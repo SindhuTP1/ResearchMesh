@@ -167,14 +167,3 @@ adminStats: AdminStats! @auth(requires: ADMIN)
 
 ---
 
-## Interview talking points (60-second version)
-
-1. **Problem:** finding a mentor is cold emails and stale department pages. The product's core filter is *recency* — who is publishing now — plus *availability*.
-2. **Why GraphQL:** deeply relational data, very different shapes per view; one query per screen.
-3. **N+1:** per-request DataLoader took a nested query from 89 DB round-trips to 8 — and I measure it in a test.
-4. **Search:** a single MongoDB aggregation with `$lookup` and `$facet`.
-5. **Matching:** IDF-weighted cosine similarity + recency decay + availability, explainable breakdown, tunable weights.
-6. **Real-time:** graphql-ws subscriptions with per-user filtering, persisted notifications, Apollo cache updates.
-7. **Security:** `@auth` schema directive with a self rule, plus ownership checks; atomic updates for race conditions.
-
-**What I'd do next:** Redis PubSub for multiple instances; cursor-based pagination; import publications from ORCID / Semantic Scholar instead of manual entry; embedding-based similarity for interests (so "LLMs" matches "large language models"); rate limiting and query-depth limits on the API.
