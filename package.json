@@ -1,0 +1,17 @@
+{
+  "name": "researchmesh",
+  "version": "1.0.0",
+  "description": "Academic collaboration & mentorship matching platform — MERN + GraphQL",
+  "scripts": {
+    "setup": "npm install && npm --prefix server install && npm --prefix client install",
+    "dev": "concurrently -n api,web -c green,blue \"npm --prefix server run dev:memory\" \"npm --prefix client run dev\"",
+    "dev:mongo": "concurrently -n api,web -c green,blue \"npm --prefix server run dev\" \"npm --prefix client run dev\"",
+    "seed": "npm --prefix server run seed",
+    "build": "npm --prefix client run build",
+    "test": "npm --prefix server test"
+  },
+  "private": true,
+  "devDependencies": {
+    "concurrently": "^10.0.6"
+  }
+}

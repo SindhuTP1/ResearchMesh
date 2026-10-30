@@ -1,0 +1,87 @@
+# Paste these into Apollo Sandbox at http://localhost:4000/graphql
+# For protected operations, run `login` first and add a header:
+#   Authorization: Bearer <token>
+
+mutation Login {
+  login(email: "faculty@researchmesh.dev", password: "password123") {
+    token
+    user { id name role }
+  }
+}
+
+# 1. The headline query — one MongoDB aggregation ($lookup publications + labs, $facet for paging)
+query ActiveNlpFacultyWithOpenSlots {
+  searchFaculty(input: { area: "nlp", publishedWithinYears: 2, hasOpenSlots: true }) {
+    totalCount
+    items {
+      name
+      title
+      department { code }
+      lab { name openSlots }
+      recentPublicationCount
+      publications(sinceYear: 2024) { title year venue }
+    }
+  }
+}
+
+# 2. Faculty-only (@auth(requires: FACULTY)) — try it with a student token to see FORBIDDEN
+query UnattachedPythonGenomicsStudents {
+  searchStudents(input: { skills: ["python", "genomics"], unattached: true }) {
+    totalCount
+    items { name email program skills { name level } interests }
+  }
+}
+
+# 3. Three different shapes of the same User type — the over/under-fetching point.
+#    Search card:
+query Card { searchFaculty(input: { limit: 3 }) { items { id name lab { openSlots } } } }
+
+#    Full profile (replace the id):
+query FullProfile($id: ID!) {
+  user(id: $id) {
+    name bio interests
+    skills { name level }
+    publications { title year authors { name } }
+    connections { name }
+    projects { title status members { name } }
+  }
+}
+
+# 4. Lab dashboard — deepest nesting in the app, one request
+query Dashboard($labId: ID!) {
+  lab(id: $labId) {
+    name openSlots totalActiveFunding
+    members { name projects { title } }
+    grants { agency amount isActive }
+    pendingRequests { requester { name skills { name } } project { title } message }
+  }
+}
+
+# 5. N+1 demo: run this, then run it again with header  x-dataloader: off
+#    and compare `extensions.dbQueries` in the response (≈8 vs ≈89).
+query NPlusOneDemo {
+  searchFaculty(input: { limit: 20 }) {
+    items {
+      name
+      department { name }
+      lab { name members { name department { code } } }
+      publications { title authors { name } }
+      projects { title }
+    }
+  }
+}
+
+# 6. Explainable recommendations with custom weights (log in as student@researchmesh.dev)
+query Matches {
+  recommendedMentors(limit: 5, weights: { skill: 0.3, interest: 0.4, recency: 0.2, availability: 0.1 }) {
+    score
+    reasons
+    breakdown { skill interest recency availability }
+    faculty { name lab { name } }
+  }
+}
+
+# 7. Real-time — open in one Sandbox tab (with a faculty token), then send a join request from another
+subscription Live {
+  notificationAdded { type message actor { name } project { title } createdAt }
+}
