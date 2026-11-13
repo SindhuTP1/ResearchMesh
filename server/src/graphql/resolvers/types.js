@@ -34,6 +34,8 @@ export const typeResolvers = {
     skills: (u) => u.skills ?? [],
     interests: (u) => u.interests ?? [],
     lookingFor: (u) => u.lookingFor ?? [],
+    verification: (u) => (u.role === 'FACULTY' ? u.verification ?? 'VERIFIED' : null),
+    isVerified: (u) => u.role !== 'FACULTY' || (u.verification ?? 'VERIFIED') === 'VERIFIED',
     connections: (u, { limit }, { loaders }) => loadMany(loaders.user, (u.connections ?? []).slice(0, limit)),
     connectionCount: (u) => (u.connections ?? []).length,
     projects: (u, _, { loaders }) => loaders.projectsByMember.load(u._id),
@@ -101,6 +103,7 @@ export const typeResolvers = {
 
   JoinRequest: {
     id,
+    kind: (r) => r.kind ?? 'REQUEST',
     requester: (r, _, { loaders }) => loaders.user.load(r.requester),
     recipient: (r, _, { loaders }) => loaders.user.load(r.recipient),
     project: (r, _, { loaders }) => (r.project ? loaders.project.load(r.project) : null),

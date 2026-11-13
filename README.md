@@ -8,34 +8,52 @@ Academic collaboration and mentorship matching for a university. Students find f
 
 ## Run it in VS Code
 
-**Prerequisite:** Node.js 22 or newer (`node -v`).
+**Prerequisites:** Node.js 22+ and MongoDB running locally on port 27017 (the Windows "MongoDB" service), or any MongoDB URI.
 
 ```bash
-# 1. Open the folder in VS Code, then in the integrated terminal:
-npm run setup      # installs root, server and client dependencies
-
-# 2. Start everything (API + web) — no MongoDB install needed
-npm run dev
+npm run setup      # once: installs root, server and client dependencies
+npm run dev        # API (http://localhost:4000) + web app (http://localhost:5173), using MongoDB from server/.env
 ```
 
-Open **http://localhost:5173** and click one of the demo-login buttons. Apollo Sandbox (to try raw GraphQL) is at **http://localhost:4000/graphql**.
+Open **http://localhost:5173**.
 
-`npm run dev` starts an **in-memory MongoDB** and seeds demo data each time. The first run downloads a MongoDB binary (~70 MB), so give it a minute. Data resets when you stop the server.
+- `server/.env` holds `MONGODB_URI` (default `mongodb://127.0.0.1:27017/researchmesh`), `JWT_SECRET` and `ADMIN_SIGNUP_CODE`. Copy `server/.env.example` if it's missing.
+- **First start on an empty database** loads the university directory automatically. After that your data is kept: accounts, chats and files survive restarts. `npm run seed` wipes and reloads it.
+- No MongoDB? `npm run dev:memory` runs an in-memory database that resets on every restart.
+- Chat files are stored in MongoDB GridFS (bucket `attachments`), so there is nothing else to configure.
 
-| Demo login (password `password123`) | What to try |
-| --- | --- |
-| `student@researchmesh.dev` | Find faculty, My matches (move the sliders), request to join a project |
-| `faculty@researchmesh.dev` | My lab dashboard, Find students, accept/decline requests |
-| `admin@researchmesh.dev` | Admin stats and role management |
+### Accounts and the three portals
 
-**See real-time working:** open a normal window logged in as *faculty* on *My lab*, and a private window logged in as *student*. Request to join "Legal-clause RAG assistant" as the student — the faculty window shows the request instantly, no refresh.
+There are **no demo logins**. Seeded people are directory records with random passwords, so nobody can log in as them. Create your own account on the sign-up page and pick a role; the login page also asks which portal you're entering, and refuses if the account has a different role.
+
+| Role | How to get an account | What the portal has |
+| --- | --- | --- |
+| **Student** | Sign up as a student | Dashboard (profile strength, top mentor matches, projects that fit your skills, labs with openings in your areas, application tracker), Find faculty, My matches, Projects, Labs, My applications |
+| **Faculty** | Sign up as faculty (department and designation required). The account waits for admin verification; it works meanwhile, with an “Unverified” tag | Dashboard (requests waiting, lab capacity, research output by year, students to invite), My lab, My projects, Publications, Join requests, Find students, Faculty directory |
+| **Admin** | Sign up as admin with the **admin access code**: set `ADMIN_SIGNUP_CODE` in `server/.env`, or copy the one-time code the server prints when it starts | Platform overview (department table, lab capacity, request outcomes, recent activity), Faculty verifications, Users and roles, Departments, Projects & labs moderation |
+
+### Teammates, connections, chat and calls
+
+- **Find teammates** (students): students ranked by shared interests (55%), shared skills (25%) and the skills they'd bring that you lack (20%). Start a team and invite people to it.
+- **Connections**: requests must be accepted; accepting a join request or invite connects people automatically.
+- **Messages** (students and faculty), all live over the WebSocket:
+  - 1:1 chats, faculty lab groups and ad-hoc groups, one team chat per project, students' own groups
+  - **files and images** (button, drag & drop or paste; 10 MB; stored in GridFS; only members can download), image lightbox
+  - **edit / delete** your messages (group admins can delete any), **emoji reactions**, emoji picker
+  - **typing indicators**, **read receipts** (✓ Sent / ✓✓ Seen / Seen by N), **online dots**
+  - **push notifications** (🔔 in Messages): Web Push via a service worker, so messages, calls and requests reach you when no tab is open
+- **Voice and video calls** (📞 / 📹 in any chat, 1:1 or groups of up to ~6): peer-to-peer WebRTC, signalled over the same WebSocket. Call timer, mute, camera toggle, minimise. Browsers allow mic/camera only on `https` or `localhost`; across strict networks set a TURN server in `client/.env` (`VITE_ICE_SERVERS`).
+- **Interface**: page transitions, animated dashboards (typewriter hero, count-up stats, swipeable sliders, match rings), skeleton loading, confetti when you're accepted, light/dark/system theme toggle, **Ctrl+K** quick search. Animations switch off for people who prefer reduced motion.
+
+**Try chat and video:** sign up a student in a normal window and another student in a private window, connect them (Find teammates → Connect → accept), then open *Messages* and press **📹 Video call**.
+
+**See real-time working:** in one window, sign up as faculty, create a lab on *My lab* and post a project. In a private window, sign up as a student with matching skills and request to join. The faculty dashboard shows the request instantly, no refresh.
 
 ### Using a real (persistent) MongoDB
 
 ```bash
-cp server/.env.example server/.env   # set MONGODB_URI (local, Docker or Atlas) and JWT_SECRET
-npm run seed                         # wipes and seeds that database
-npm run dev:mongo
+cp server/.env.example server/.env   # set MONGODB_URI, JWT_SECRET and ADMIN_SIGNUP_CODE
+npm run dev                          # loads the directory automatically if the database is empty
 ```
 
 Docker one-liner for a local Mongo: `docker run -d -p 27017:27017 --name mongo mongo:7`
@@ -44,7 +62,7 @@ Docker one-liner for a local Mongo: `docker run -d -p 27017:27017 --name mongo m
 
 | Command | |
 | --- | --- |
-| `npm test` | 19 tests: matching engine unit tests + end-to-end API tests (auth, DataLoader, subscriptions) |
+| `npm test` | 33 tests: matching engine unit tests + end-to-end API tests (auth, portals, verification, search filters, DataLoader, subscriptions, connections, chat permissions, live messages, groups, invites, call signalling, attachments, reactions, edits, typing, read receipts, presence, push) |
 | `npm run build` | Production build of the client |
 | **F5** in VS Code | Debug configs for the API, tests and the client (see `.vscode/launch.json`) |
 
@@ -106,7 +124,7 @@ Rendering 20 faculty with `department`, `lab { members { department } }`, `publi
 | | DB queries for the same nested query |
 | --- | --- |
 | DataLoader on | **8** |
-| DataLoader off (`x-dataloader: off` header) | **89** |
+| DataLoader off (`x-dataloader: off` header) | **176** |
 
 Two details worth mentioning in an interview: batch functions must **return results in the same order as the keys** (we map through a `Map`), and one-to-many relations (author → publications) use a *grouped* loader that buckets results per key.
 

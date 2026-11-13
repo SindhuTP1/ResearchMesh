@@ -68,7 +68,9 @@ function CurrentUser({ token, login, logout, children }) {
       loading: !!token && loading,
       login,
       logout,
-      isFaculty: user?.role === 'FACULTY' || user?.role === 'ADMIN',
+      role: user?.role ?? null,
+      isStudent: user?.role === 'STUDENT',
+      isFaculty: user?.role === 'FACULTY',
       isAdmin: user?.role === 'ADMIN',
     }),
     [token, user, loading, login, logout]

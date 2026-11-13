@@ -1,12 +1,16 @@
 import { Notification, User } from '../models/index.js';
 import { pubsub, EVENTS } from '../pubsub.js';
 import { opportunityFits } from './matching.js';
+import { pushInBackground } from './push.js';
+
+const LINKS = { JOIN_REQUEST: '/requests', CONNECTION_REQUEST: '/connections', NEW_CONNECTION: '/connections', PROJECT_INVITE: '/applications?tab=invites' };
 
 /** Persist a notification and push it to the recipient's live subscription. */
 export async function notify({ recipient, type, message, actor, project, lab, joinRequest }) {
   const doc = await Notification.create({ recipient, type, message, actor, project, lab, joinRequest });
   const plain = doc.toObject();
   await pubsub.publish(EVENTS.NOTIFICATION_ADDED, { notificationAdded: plain });
+  pushInBackground(recipient, { title: 'ResearchMesh', body: message, url: LINKS[type] ?? (project ? `/projects/${project}` : '/notifications'), tag: `n-${plain._id}` });
   return plain;
 }
 

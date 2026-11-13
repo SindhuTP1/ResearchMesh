@@ -2,16 +2,20 @@ import { Link } from 'react-router-dom';
 import { useMutation, useQuery } from '@apollo/client/react';
 import { NOTIFICATIONS, MARK_READ } from '../graphql/operations.js';
 import { Loading, ErrorNote, Empty, timeAgo } from '../components/ui.jsx';
+import { useAuth } from '../auth/AuthContext.jsx';
 
-function linkFor(n) {
+function linkFor(n, role) {
   if (n.type === 'JOIN_REQUEST') return '/requests';
+  if (n.type === 'ACCOUNT_UPDATE') return role === 'ADMIN' ? '/admin/verifications' : role === 'FACULTY' ? '/faculty' : null;
+  if (n.type === 'REQUEST_ACCEPTED' || n.type === 'REQUEST_REJECTED') return n.project ? `/projects/${n.project.id}` : '/applications';
   if (n.project) return `/projects/${n.project.id}`;
-  if (n.lab) return '/labs';
+  if (n.lab) return role === 'ADMIN' ? '/admin/projects' : '/labs';
   if (n.actor) return `/people/${n.actor.id}`;
   return null;
 }
 
 export default function Notifications() {
+  const { role } = useAuth();
   // List is kept current by the NotificationAdded subscription in Layout (written straight into cache).
   const { data, loading, error } = useQuery(NOTIFICATIONS);
   const [markRead] = useMutation(MARK_READ, {
@@ -39,10 +43,10 @@ export default function Notifications() {
       </div>
       <ErrorNote error={error} />
       {loading && !data && <Loading />}
-      {data && list.length === 0 && <Empty><p>Nothing yet. Request to join a project, or add interests to your profile to hear about matching openings.</p></Empty>}
+      {data && list.length === 0 && <Empty><p>{role === 'ADMIN' ? 'Nothing yet. New faculty sign-ups waiting for verification will show up here.' : role === 'FACULTY' ? 'Nothing yet. Join requests to your lab and projects will show up here.' : 'Nothing yet. Request to join a project, or add interests to your profile to hear about matching openings.'}</p></Empty>}
       <div className="notes">
         {list.map((n) => {
-          const to = linkFor(n);
+          const to = linkFor(n, role);
           return (
             <div key={n.id} className={`note ${n.read ? '' : 'unread'}`}>
               <span className="dot" aria-label={n.read ? undefined : 'Unread'} />

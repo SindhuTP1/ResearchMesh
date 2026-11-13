@@ -1,12 +1,34 @@
 # Paste these into Apollo Sandbox at http://localhost:4000/graphql
-# For protected operations, run `login` first and add a header:
+# There are no demo accounts. Register first (or log in with an account you created in the app),
+# then add the returned token as a header for protected operations:
 #   Authorization: Bearer <token>
 
-mutation Login {
-  login(email: "faculty@researchmesh.dev", password: "password123") {
+mutation RegisterStudent {
+  register(input: { name: "Your Name", email: "you@univ.edu", password: "choose-a-password", role: STUDENT }) {
     token
     user { id name role }
   }
+}
+
+# `role` is the portal you are logging in to; the login fails if the account has a different role.
+mutation Login {
+  login(email: "you@univ.edu", password: "choose-a-password", role: STUDENT) {
+    token
+    user { id name role }
+  }
+}
+
+# Search across the new fields: cloud or devops faculty with Java + Spring Boot, most open slots first
+query CloudDevopsFaculty {
+  searchFaculty(input: { areas: ["cloud", "devops"], skills: ["java", "spring boot"], matchAnySkill: true, sortBy: OPEN_SLOTS }) {
+    totalCount
+    items { name title department { code } lab { name openSlots } }
+  }
+}
+
+# Filter values that exist in the data (for building dropdowns)
+query FacultyFilterOptions {
+  filterOptions(role: FACULTY) { areas { value count } skills { value count } titles }
 }
 
 # 1. The headline query — one MongoDB aggregation ($lookup publications + labs, $facet for paging)
@@ -71,7 +93,7 @@ query NPlusOneDemo {
   }
 }
 
-# 6. Explainable recommendations with custom weights (log in as student@researchmesh.dev)
+# 6. Explainable recommendations with custom weights (use a student token)
 query Matches {
   recommendedMentors(limit: 5, weights: { skill: 0.3, interest: 0.4, recency: 0.2, availability: 0.1 }) {
     score

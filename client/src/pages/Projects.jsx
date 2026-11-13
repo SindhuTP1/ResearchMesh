@@ -52,11 +52,11 @@ function ProjectCard({ p }) {
   );
 }
 
-function NewProject({ onDone }) {
+export function NewProject({ onDone, stay }) {
   const navigate = useNavigate();
   const { data: meData } = useQuery(ME);
   const [form, setForm] = useState({ title: '', description: '', requiredSkills: '', tags: '', maxMembers: 5, inLab: true });
-  const [create, { loading, error }] = useMutation(CREATE_PROJECT, { refetchQueries: [PROJECTS] });
+  const [create, { loading, error }] = useMutation(CREATE_PROJECT, { refetchQueries: [PROJECTS, 'MyProjects', 'FacultyDashboard'] });
   const myLab = meData?.me?.lab;
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
 
@@ -74,7 +74,7 @@ function NewProject({ onDone }) {
             },
           },
         }).catch(() => ({}));
-        if (data) { onDone(); navigate(`/projects/${data.createProject.id}`); }
+        if (data) { onDone(); if (!stay) navigate(`/projects/${data.createProject.id}`); }
       }}
     >
       <h3>New project</h3>

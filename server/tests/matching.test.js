@@ -87,3 +87,18 @@ test('opportunityFits: matches on interests, rejects unrelated', () => {
   assert.equal(opportunityFits(st, { areas: ['nlp', 'document ai'] }).fits, true);
   assert.equal(opportunityFits(st, { areas: ['genomics'] }).fits, false);
 });
+
+test('rankTeammates: shared domain beats unrelated, complementary skills add a little', async () => {
+  const { rankTeammates } = await import('../src/services/matching.js');
+  const me = { skills: [{ name: 'java', level: 4 }, { name: 'spring boot', level: 3 }], interests: ['devops', 'cloud computing'] };
+  const ranked = rankTeammates(me, [
+    { id: 'chem', skills: [{ name: 'hplc', level: 4 }, { name: 'nmr spectroscopy', level: 4 }], interests: ['green chemistry'] },
+    { id: 'same', skills: [{ name: 'java', level: 3 }], interests: ['devops', 'cloud computing'] },
+    { id: 'complement', skills: [{ name: 'kubernetes', level: 4 }, { name: 'terraform', level: 3 }, { name: 'aws', level: 3 }], interests: ['devops'] },
+  ]);
+  const order = ranked.map((r) => r.id);
+  assert.equal(order.at(-1), 'chem', 'no shared domain → last');
+  assert.equal(ranked.find((r) => r.id === 'chem').breakdown.complement, 0, 'unrelated skills are not "complementary"');
+  assert.ok(ranked.find((r) => r.id === 'complement').newSkills.includes('kubernetes'));
+  assert.ok(ranked.find((r) => r.id === 'same').reasons.some((x) => x.startsWith('Shared interests')));
+});

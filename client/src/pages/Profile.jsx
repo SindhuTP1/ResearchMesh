@@ -1,16 +1,17 @@
 import { useState } from 'react';
-import { Link, useParams, useNavigate } from 'react-router-dom';
+import { Link, useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery } from '@apollo/client/react';
-import { USER_PROFILE, CONNECT, ADD_PUBLICATION, MY_PROFILE_EDIT, UPDATE_PROFILE } from '../graphql/operations.js';
+import { USER_PROFILE, ADD_PUBLICATION, MY_PROFILE_EDIT, UPDATE_PROFILE } from '../graphql/operations.js';
+import { ConnectButton, MessageButton, InviteButton } from '../components/social.jsx';
 import { useAuth } from '../auth/AuthContext.jsx';
-import { Avatar, Skills, Interests, Loading, ErrorNote, Status, UserLink, useToast, errorText, csv, timeAgo } from '../components/ui.jsx';
+import { Avatar, Skills, Interests, Loading, ErrorNote, Status, UserLink, VerifiedBadge, useToast, errorText, csv, timeAgo } from '../components/ui.jsx';
 
 const THIS_YEAR = new Date().getFullYear();
 
-function AddPublication({ userId }) {
+export function AddPublication({ userId, refetchQueries }) {
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({ title: '', venue: '', year: THIS_YEAR, keywords: '' });
-  const [add, { loading, error }] = useMutation(ADD_PUBLICATION, { refetchQueries: [{ query: USER_PROFILE, variables: { id: userId } }] });
+  const [add, { loading, error }] = useMutation(ADD_PUBLICATION, { refetchQueries: refetchQueries ?? [{ query: USER_PROFILE, variables: { id: userId } }] });
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
   if (!open) return <button className="btn btn-sm" onClick={() => setOpen(true)}>Add publication</button>;
   return (
@@ -36,31 +37,29 @@ export default function Profile() {
   const { user: me } = useAuth();
   const toast = useToast();
   const { data, loading, error } = useQuery(USER_PROFILE, { variables: { id } });
-  const [connect, { loading: connecting }] = useMutation(CONNECT, { refetchQueries: [{ query: USER_PROFILE, variables: { id } }] });
 
   if (loading) return <Loading />;
   if (error && !data?.user) return <ErrorNote error={error} />;
   const u = data?.user;
   if (!u) return <p>Person not found.</p>;
   const isMe = u.id === me?.id;
-  const alreadyConnected = u.connections.some((c) => c.id === me?.id);
 
   return (
     <>
       <div className="profile-head">
         <Avatar user={u} size="lg" />
         <div>
-          <h1>{u.name}</h1>
+          <h1>{u.name} <VerifiedBadge user={u} /></h1>
           <p className="muted">{[u.title || u.program, u.department?.name].filter(Boolean).join(', ')}</p>
           {u.email && <p className="faint">{u.email}</p>}
           {u.bio && <p style={{ marginTop: 10, maxWidth: '64ch' }}>{u.bio}</p>}
         </div>
         <div className="row">
-          {isMe ? <Link className="btn" to="/profile/edit">Edit profile</Link> : alreadyConnected ? <span className="faint">Connected</span> : (
-            <button className="btn btn-primary" disabled={connecting} onClick={async () => {
-              try { await connect({ variables: { userId: u.id } }); toast({ kind: 'ok', title: 'Connected', body: `${u.name} has been notified.` }); }
-              catch (e) { toast({ kind: 'error', title: 'Not connected', body: errorText(e) }); }
-            }}>Connect</button>
+          {me?.role === 'ADMIN' || u.role === 'ADMIN' ? null : isMe ? <Link className="btn" to="/profile/edit">Edit profile</Link> : (
+            <>
+              {u.connectionStatus === 'CONNECTED' ? <><span className="status accepted">Connected</span><MessageButton user={u} size="md" primary /></> : <ConnectButton user={u} size="md" />}
+              {u.role === 'STUDENT' && <InviteButton user={u} />}
+            </>
           )}
         </div>
       </div>
@@ -140,6 +139,8 @@ export function ProfileEdit() {
 
 function ProfileForm({ me, departments }) {
   const navigate = useNavigate();
+  const [params] = useSearchParams();
+  const welcome = params.get('welcome') === '1';
   const toast = useToast();
   const [form, setForm] = useState({
     name: me.name, bio: me.bio ?? '', title: me.title ?? '', program: me.program ?? '', yearOfStudy: me.yearOfStudy ?? '',
@@ -159,7 +160,12 @@ function ProfileForm({ me, departments }) {
 
   return (
     <>
-      <div className="page-head"><h1>Edit profile</h1></div>
+      <div className="page-head">
+        <div>
+          <h1>{welcome ? 'Welcome! Set up your profile' : 'Edit profile'}</h1>
+          {welcome && <p className="muted">Add the skills you have and the research you're curious about. Mentor matches, project suggestions and opening alerts are all built from this.</p>}
+        </div>
+      </div>
       <form className="stack" onSubmit={async (e) => {
         e.preventDefault();
         const input = {
@@ -167,7 +173,7 @@ function ProfileForm({ me, departments }) {
           departmentId: form.departmentId || null,
           ...(isStudent ? { program: form.program, yearOfStudy: form.yearOfStudy ? Number(form.yearOfStudy) : null, lookingFor: form.lookingFor } : { title: form.title }),
         };
-        try { await save({ variables: { input } }); toast({ kind: 'ok', title: 'Profile saved', body: 'Your matches will reflect the changes.' }); navigate(`/people/${me.id}`); }
+        try { await save({ variables: { input } }); toast({ kind: 'ok', title: 'Profile saved', body: 'Your matches will reflect the changes.' }); navigate(welcome ? '/student' : `/people/${me.id}`); }
         catch (err) { toast({ kind: 'error', title: 'Not saved', body: errorText(err) }); }
       }}>
         <section className="panel stack">
@@ -223,7 +229,7 @@ function ProfileForm({ me, departments }) {
           </div>
         </section>
         <ErrorNote error={error} />
-        <div className="row"><button className="btn btn-primary" disabled={loading}>Save profile</button><Link className="btn btn-ghost" to={`/people/${me.id}`}>Cancel</Link></div>
+        <div className="row"><button className="btn btn-primary" disabled={loading}>Save profile</button><Link className="btn btn-ghost" to={welcome ? '/student' : `/people/${me.id}`}>{welcome ? 'Skip for now' : 'Cancel'}</Link></div>
       </form>
     </>
   );

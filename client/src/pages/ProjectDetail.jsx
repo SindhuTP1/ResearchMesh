@@ -1,11 +1,12 @@
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery } from '@apollo/client/react';
-import { PROJECT_DETAIL, RECOMMENDED_STUDENTS, UPDATE_PROJECT } from '../graphql/operations.js';
+import { PROJECT_DETAIL, RECOMMENDED_STUDENTS, UPDATE_PROJECT, OPEN_PROJECT_CHAT } from '../graphql/operations.js';
+import { PersonActions } from '../components/social.jsx';
 import { useAuth } from '../auth/AuthContext.jsx';
 import { JoinButton } from './Projects.jsx';
 import MatchBar from '../components/MatchBar.jsx';
 import PersonRow from '../components/PersonRow.jsx';
-import { Loading, ErrorNote, Status, UserLink } from '../components/ui.jsx';
+import { Loading, ErrorNote, Status, UserLink, useToast, errorText } from '../components/ui.jsx';
 
 const PROJECT_WEIGHTS = { skill: 0.7, interest: 0.3, recency: 0, availability: 0 };
 
@@ -21,7 +22,7 @@ function Recommendations({ projectId, requiredSkills }) {
       {loading && <Loading />}
       {data?.recommendedStudentsForProject.map((m) => (
         <div className="match-row" key={m.student.id}>
-          <PersonRow user={m.student} highlightSkills={requiredSkills} />
+          <PersonRow user={m.student} highlightSkills={requiredSkills} side={<PersonActions user={m.student} invite />} />
           <div style={{ paddingTop: 16 }}>
             <MatchBar score={m.score} breakdown={m.breakdown} weights={PROJECT_WEIGHTS} reasons={m.reasons} />
           </div>
@@ -31,9 +32,20 @@ function Recommendations({ projectId, requiredSkills }) {
   );
 }
 
+function TeamChatButton({ projectId }) {
+  const navigate = useNavigate();
+  const toast = useToast();
+  const [open, { loading }] = useMutation(OPEN_PROJECT_CHAT);
+  return (
+    <button className="btn" disabled={loading} onClick={() => open({ variables: { projectId } })
+      .then(({ data }) => navigate(`/messages/${data.openProjectConversation.id}`))
+      .catch((e) => toast({ kind: 'error', title: 'Chat not opened', body: errorText(e) }))}>Team chat</button>
+  );
+}
+
 export default function ProjectDetail() {
   const { id } = useParams();
-  const { user } = useAuth();
+  const { user, isAdmin } = useAuth();
   const { data, loading, error } = useQuery(PROJECT_DETAIL, { variables: { id } });
   const [update, { loading: saving }] = useMutation(UPDATE_PROJECT);
   if (loading) return <Loading />;
@@ -41,16 +53,20 @@ export default function ProjectDetail() {
   const p = data.project;
   if (!p) return <p>Project not found.</p>;
   const isOwner = p.owner.id === user?.id;
+  const isMember = isOwner || p.members.some((m) => m.id === user?.id);
 
   return (
     <>
       <div className="page-head">
         <div>
-          <p className="faint"><Link to="/projects">Projects</Link></p>
+          <p className="faint"><Link to={isAdmin ? '/admin/projects' : user?.role === 'FACULTY' && p.owner.id === user.id ? '/my-projects' : '/projects'}>{isAdmin ? 'Projects & labs' : 'Projects'}</Link></p>
           <h1>{p.title}</h1>
           <p className="muted">Led by <UserLink user={p.owner} />{p.lab && <>, <Link to={`/labs`}>{p.lab.name}</Link></>}</p>
         </div>
-        <JoinButton project={p} />
+        <div className="row">
+          {isMember && !isAdmin && <TeamChatButton projectId={p.id} />}
+          {!isAdmin && <JoinButton project={p} />}
+        </div>
       </div>
 
       <div className="two-col">
