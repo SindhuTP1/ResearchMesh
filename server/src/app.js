@@ -10,6 +10,9 @@ import { buildSchema } from './graphql/schema.js';
 import { createLoaders } from './graphql/loaders.js';
 import { userFromToken } from './auth.js';
 import { als, newStore, installQueryCounter, queryCountPlugin } from './queryCounter.js';
+import { filesRouter } from './files.js';
+import { socketOpened, socketClosed } from './services/presence.js';
+import { initPush } from './services/push.js';
 
 /**
  * Builds the Express + Apollo + graphql-ws stack. HTTP queries/mutations and WebSocket subscriptions
@@ -29,7 +32,11 @@ export async function createServer({ port = 4000, corsOrigin = '*' } = {}) {
       // Authenticate once per socket from connectionParams; context is rebuilt per operation.
       onConnect: async (ctx) => {
         ctx.extra.user = await userFromToken(ctx.connectionParams?.authorization);
+        if (ctx.extra.user) socketOpened(ctx.extra.user._id); // presence: online while a socket is open
         return true; // allow anonymous sockets; protected subscriptions reject in their resolver
+      },
+      onDisconnect: (ctx) => {
+        if (ctx.extra.user) socketClosed(ctx.extra.user._id);
       },
       context: async (ctx) => {
         const user = ctx.extra.user ?? null;
@@ -58,6 +65,9 @@ export async function createServer({ port = 4000, corsOrigin = '*' } = {}) {
   await apollo.start();
 
   app.get('/health', (_req, res) => res.json({ ok: true }));
+  // Chat attachments (GridFS). Vite proxies /api in development.
+  app.use('/api', filesRouter({ corsMiddleware: cors({ origin: corsOrigin, credentials: true }) }));
+  await initPush().catch((e) => console.warn('Web Push disabled:', e.message));
 
   app.use(
     '/graphql',

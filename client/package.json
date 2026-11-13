@@ -16,6 +16,7 @@
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "react-router-dom": "^7.18.5",
+    "researchmesh": "file:..",
     "rxjs": "^7.8.2"
   },
   "devDependencies": {

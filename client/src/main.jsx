@@ -4,6 +4,9 @@ import { BrowserRouter } from 'react-router-dom';
 import { AuthProvider } from './auth/AuthContext.jsx';
 import { ToastProvider } from './components/ui.jsx';
 import App from './App.jsx';
+import { applySavedTheme } from './components/theme.jsx';
+
+applySavedTheme();
 import './styles.css';
 
 createRoot(document.getElementById('root')).render(

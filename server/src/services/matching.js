@@ -235,3 +235,50 @@ export function opportunityFits(student, { areas = [], requiredSkills = [] }, th
   const score = requiredSkills.length ? 0.5 * interestSim + 0.5 * cov : interestSim;
   return { fits: score >= threshold, score: round(score) };
 }
+
+export const TEAMMATE_WEIGHTS = Object.freeze({ interest: 0.55, skill: 0.25, complement: 0.2 });
+
+/**
+ * Rank fellow students as teammates.
+ *
+ *   score = 0.55 · interestSimilarity   IDF-weighted cosine over interests — do you care about the same domain?
+ *         + 0.25 · skillSimilarity      IDF-weighted cosine over skills — can you work in the same stack?
+ *         + 0.20 · complement           share of their skills you DON'T have (capped) — do they fill your gaps?
+ *
+ * Complement is only counted when there is some shared interest, so a random person with lots of
+ * unrelated skills doesn't rank highly just for being different.
+ */
+export function rankTeammates(seeker, candidates, opts = {}) {
+  const w = { ...TEAMMATE_WEIGHTS, ...(opts.weights || {}) };
+  const limit = opts.limit ?? 20;
+  const mySkills = skillVector(seeker.skills);
+  const myInterests = termVector(seeker.interests);
+  const prepared = candidates.map((c) => ({ raw: c, skills: skillVector(c.skills), interests: termVector(c.interests) }));
+  const skillIdf = computeIdf([mySkills, ...prepared.map((p) => p.skills)]);
+  const interestIdf = computeIdf([myInterests, ...prepared.map((p) => p.interests)]);
+
+  return prepared
+    .map((p) => {
+      const interest = cosine(myInterests, p.interests, interestIdf);
+      const skill = cosine(mySkills, p.skills, skillIdf);
+      const newSkills = Object.keys(p.skills).filter((k) => !(k in mySkills));
+      const complement = interest > 0 ? Math.min(1, newSkills.length / 3) : 0;
+      const score = w.interest * interest + w.skill * skill + w.complement * complement;
+      const sharedInterests = sharedTerms(myInterests, p.interests, interestIdf, 6);
+      const sharedSkills = sharedTerms(mySkills, p.skills, skillIdf, 6);
+      const reasons = [];
+      if (sharedInterests.length) reasons.push(`Shared interests: ${sharedInterests.join(', ')}`);
+      if (sharedSkills.length) reasons.push(`Shared skills: ${sharedSkills.join(', ')}`);
+      if (complement > 0) reasons.push(`Brings skills you don't have: ${newSkills.slice(0, 4).join(', ')}`);
+      return {
+        id: String(p.raw.id),
+        score: round(score),
+        breakdown: { interest: round(interest), skill: round(skill), complement: round(complement) },
+        reasons,
+        sharedInterests,
+        newSkills: complement > 0 ? newSkills.slice(0, 6) : [],
+      };
+    })
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit);
+}

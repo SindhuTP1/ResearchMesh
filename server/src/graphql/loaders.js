@@ -1,5 +1,6 @@
+import mongoose from 'mongoose';
 import DataLoader from 'dataloader';
-import { User, Lab, Department, Project, Publication, Grant, JoinRequest } from '../models/index.js';
+import { User, Lab, Department, Project, Publication, Grant, JoinRequest, ConnectionRequest, Message } from '../models/index.js';
 
 /**
  * Per-request DataLoaders — the N+1 fix.
@@ -60,6 +61,40 @@ export function createLoaders({ batching = true, userId = null } = {}) {
       for (const r of reqs) if (!map.has(toKey(r.project))) map.set(toKey(r.project), r.status);
       return projectIds.map((id) => map.get(toKey(id)) ?? null);
     }, { cacheKeyFn: toKey, ...opts }),
+
+    /** Pending connection request between the caller and each user (either direction). */
+    pendingConnectionWith: new DataLoader(async (otherIds) => {
+      if (!userId) return otherIds.map(() => null);
+      const reqs = await ConnectionRequest.find({
+        status: 'PENDING',
+        $or: [{ from: userId, to: { $in: otherIds } }, { to: userId, from: { $in: otherIds } }],
+      }).lean();
+      const map = new Map();
+      for (const r of reqs) map.set(toKey(String(r.from) === String(userId) ? r.to : r.from), r);
+      return otherIds.map((id) => map.get(toKey(id)) ?? null);
+    }, { cacheKeyFn: toKey, ...opts }),
+
+    /** Latest message per conversation — one aggregation for the whole inbox. */
+    lastMessage: new DataLoader(async (convIds) => {
+      const rows = await Message.aggregate([
+        { $match: { conversation: { $in: convIds.map((id) => new mongoose.Types.ObjectId(String(id))) } } },
+        { $sort: { createdAt: -1 } },
+        { $group: { _id: '$conversation', doc: { $first: '$$ROOT' } } },
+      ]);
+      const map = new Map(rows.map((r) => [toKey(r._id), r.doc]));
+      return convIds.map((id) => map.get(toKey(id)) ?? null);
+    }, { cacheKeyFn: toKey, ...opts }),
+
+    /** Unread messages per conversation for the caller. Keys are { id, since } (since = caller's last read). */
+    unreadCount: new DataLoader(async (keys) => {
+      if (!userId) return keys.map(() => 0);
+      const rows = await Message.aggregate([
+        { $match: { kind: 'TEXT', sender: { $ne: userId }, $or: keys.map((k) => ({ conversation: k.id, createdAt: { $gt: k.since } })) } },
+        { $group: { _id: '$conversation', n: { $sum: 1 } } },
+      ]);
+      const map = new Map(rows.map((r) => [toKey(r._id), r.n]));
+      return keys.map((k) => map.get(toKey(k.id)) ?? 0);
+    }, { cacheKeyFn: (k) => toKey(k.id), ...opts }),
 
     publicationsByAuthor: groupedLoader(Publication, 'authors', { sort: { year: -1, _id: 1 } }, opts),
     projectsByMember: groupedLoader(Project, 'members', { sort: { updatedAt: -1, _id: 1 } }, opts),

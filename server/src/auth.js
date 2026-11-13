@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import jwt from 'jsonwebtoken';
 import { GraphQLError } from 'graphql';
 import { User } from './models/index.js';
@@ -42,4 +43,28 @@ export function requireUser(ctx) {
 
 export function hasRole(user, role) {
   return !!user && ROLE_RANK[user.role] >= ROLE_RANK[role];
+}
+
+/**
+ * Admin accounts can only be created with the access code in ADMIN_SIGNUP_CODE.
+ * If it isn't configured, a one-off code is generated at startup and printed to the server console,
+ * so whoever runs the server (and only they) can create the first admin.
+ */
+export function ensureAdminSignupCode({ log = true } = {}) {
+  if (!process.env.ADMIN_SIGNUP_CODE) {
+    process.env.ADMIN_SIGNUP_CODE = `RM-${crypto.randomBytes(3).toString('hex').toUpperCase()}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
+    if (log) {
+      console.log(`\n🔑 Admin sign-up code (valid until the server restarts): ${process.env.ADMIN_SIGNUP_CODE}`);
+      console.log('   Set ADMIN_SIGNUP_CODE in server/.env to make it permanent.\n');
+    }
+  }
+  return process.env.ADMIN_SIGNUP_CODE;
+}
+
+export function checkAdminSignupCode(code) {
+  const expected = process.env.ADMIN_SIGNUP_CODE;
+  if (!expected || !code) return false;
+  const a = Buffer.from(String(code).trim());
+  const b = Buffer.from(expected);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
 }

@@ -1,5 +1,5 @@
 import mongoose from 'mongoose';
-import { User, Lab, Department, Project, JoinRequest, Notification } from '../../models/index.js';
+import { User, Lab, Department, Project, JoinRequest, Notification, Publication } from '../../models/index.js';
 import { requireUser, forbidden, badInput, hasRole } from '../../auth.js';
 import { rankCandidates, rankStudentsForProject } from '../../services/matching.js';
 
@@ -8,31 +8,52 @@ const oid = (id) => {
   if (!mongoose.isValidObjectId(id)) throw badInput(`Invalid id: ${id}`);
   return new mongoose.Types.ObjectId(String(id));
 };
+/** Ids of everyone with a publication in the last 2 calendar years. */
+const activeResearcherIds = () => Publication.distinct('authors', { year: { $gte: new Date().getFullYear() - 2 } });
 const clampLimit = (n, max = 100) => Math.min(Math.max(1, n ?? 20), max);
+
+const lower = (xs) => (xs ?? []).map((x) => String(x).toLowerCase().trim()).filter(Boolean);
+const anyRegex = (terms) => terms.map((t) => new RegExp(escapeRegex(t), 'i'));
+
+const FACULTY_SORTS = {
+  RELEVANCE: { _recent2: -1, lastActiveAt: -1, _id: 1 },
+  RECENT_PAPERS: { _recent2: -1, name: 1, _id: 1 },
+  OPEN_SLOTS: { _openSlots: -1, _recent2: -1, _id: 1 },
+  NAME: { name: 1, _id: 1 },
+  RECENTLY_ACTIVE: { lastActiveAt: -1, _id: 1 },
+};
 
 /**
  * searchFaculty — one MongoDB aggregation pipeline:
- *   $match faculty → $lookup recent publications → $lookup labs they head → filter → $facet (page + count)
+ *   $match faculty → $lookup recent publications → $lookup labs they head → derived fields → filter → $facet (page + count)
  * So "NLP faculty who published in the last 2 years with an open slot" is a single DB round-trip.
  */
 async function searchFaculty(_, { input }) {
-  const { area, skills, publishedWithinYears, hasOpenSlots, departmentId } = input;
+  const { area, areas, skills, matchAnySkill, publishedWithinYears, hasOpenSlots, departmentId, titles, minRecentPublications, hasLab, verifiedOnly, name, sortBy } = input;
   const limit = clampLimit(input.limit);
   const offset = Math.max(0, input.offset ?? 0);
   const year = new Date().getFullYear();
-  const minYear = publishedWithinYears != null ? year - publishedWithinYears : year - 3;
+  const windowMin = publishedWithinYears != null ? year - publishedWithinYears : year - 3;
+  const lookupMin = Math.min(windowMin, year - 2);
 
   const match = { role: 'FACULTY' };
   if (departmentId) match.department = oid(departmentId);
-  if (skills?.length) match['skills.name'] = { $all: skills.map((s) => s.toLowerCase().trim()) };
+  const skillNames = lower(skills);
+  if (skillNames.length) match['skills.name'] = matchAnySkill ? { $in: skillNames } : { $all: skillNames };
+  if (titles?.length) match.title = { $in: titles };
+  if (verifiedOnly) match.verification = { $nin: ['PENDING', 'REJECTED'] };
+  if (name?.trim()) match.name = new RegExp(escapeRegex(name.trim()), 'i');
 
   const post = [];
-  if (publishedWithinYears != null) post.push({ 'recentPubs.0': { $exists: true } });
-  if (hasOpenSlots) post.push({ 'headedLabs.openSlots': { $gt: 0 } });
-  if (area?.trim()) {
-    const re = new RegExp(escapeRegex(area.trim()), 'i');
+  if (publishedWithinYears != null) post.push({ _inWindow: { $gt: 0 } });
+  if (minRecentPublications) post.push({ _recent2: { $gte: minRecentPublications } });
+  if (hasOpenSlots) post.push({ _openSlots: { $gt: 0 } });
+  if (hasLab) post.push({ 'headedLabs.0': { $exists: true } });
+  const areaTerms = [...new Set([...(area?.trim() ? [area.trim()] : []), ...lower(areas)])];
+  if (areaTerms.length) {
+    const res = anyRegex(areaTerms);
     post.push({
-      $or: [{ interests: re }, { 'headedLabs.researchAreas': re }, { 'recentPubs.keywords': re }, { bio: re }],
+      $or: [{ interests: { $in: res } }, { 'headedLabs.researchAreas': { $in: res } }, { 'recentPubs.keywords': { $in: res } }, { bio: { $in: res } }],
     });
   }
 
@@ -43,22 +64,28 @@ async function searchFaculty(_, { input }) {
         from: 'publications',
         let: { uid: '$_id' },
         pipeline: [
-          { $match: { $expr: { $in: ['$$uid', '$authors'] }, year: { $gte: minYear } } },
+          { $match: { $expr: { $in: ['$$uid', '$authors'] }, year: { $gte: lookupMin } } },
           { $project: { keywords: 1, year: 1 } },
         ],
         as: 'recentPubs',
       },
     },
     { $lookup: { from: 'labs', localField: '_id', foreignField: 'head', as: 'headedLabs' } },
+    {
+      $addFields: {
+        _inWindow: { $size: { $filter: { input: '$recentPubs', cond: { $gte: ['$$this.year', windowMin] } } } },
+        _recent2: { $size: { $filter: { input: '$recentPubs', cond: { $gte: ['$$this.year', year - 2] } } } },
+        _openSlots: { $sum: '$headedLabs.openSlots' },
+      },
+    },
     ...(post.length ? [{ $match: { $and: post } }] : []),
     {
       $facet: {
         items: [
-          { $addFields: { _recent: { $size: '$recentPubs' } } },
-          { $sort: { _recent: -1, lastActiveAt: -1, _id: 1 } },
+          { $sort: FACULTY_SORTS[sortBy] ?? FACULTY_SORTS.RELEVANCE },
           { $skip: offset },
           { $limit: limit },
-          { $project: { recentPubs: 0, headedLabs: 0, _recent: 0, passwordHash: 0 } },
+          { $project: { recentPubs: 0, headedLabs: 0, _recent2: 0, _inWindow: 0, _openSlots: 0, passwordHash: 0 } },
         ],
         total: [{ $count: 'n' }],
       },
@@ -67,32 +94,82 @@ async function searchFaculty(_, { input }) {
   return { totalCount: res.total[0]?.n ?? 0, items: res.items };
 }
 
+const STUDENT_SORTS = {
+  RECENTLY_ACTIVE: { lastActiveAt: -1, _id: 1 },
+  NAME: { name: 1, _id: 1 },
+  YEAR: { yearOfStudy: -1, name: 1, _id: 1 },
+};
+
 /** searchStudents — faculty only (enforced by @auth). */
 async function searchStudents(_, { input }) {
-  const { skills, unattached, interests, departmentId, program, minSkillLevel } = input;
+  const { skills, unattached, interests, departmentId, program, programs, years, lookingFor, name, minSkillLevel, sortBy } = input;
   const limit = clampLimit(input.limit);
   const offset = Math.max(0, input.offset ?? 0);
 
   const filter = { role: 'STUDENT' };
-  if (skills?.length) {
-    const names = skills.map((s) => s.toLowerCase().trim());
+  const names = lower(skills);
+  if (names.length) {
     if (minSkillLevel) {
       // every requested skill must be present at >= minSkillLevel
-      filter.skills = { $all: names.map((name) => ({ $elemMatch: { name, level: { $gte: minSkillLevel } } })) };
+      filter.skills = { $all: names.map((n) => ({ $elemMatch: { name: n, level: { $gte: minSkillLevel } } })) };
     } else {
       filter['skills.name'] = { $all: names };
     }
   }
   if (unattached) filter.lab = null;
-  if (interests?.length) filter.interests = { $in: interests.map((s) => s.toLowerCase().trim()) };
+  if (interests?.length) filter.interests = { $in: lower(interests) };
   if (departmentId) filter.department = oid(departmentId);
   if (program) filter.program = new RegExp(`^${escapeRegex(program)}$`, 'i');
+  if (programs?.length) filter.program = { $in: programs };
+  if (years?.length) filter.yearOfStudy = { $in: years };
+  if (lookingFor?.length) filter.lookingFor = { $in: lookingFor };
+  if (name?.trim()) filter.name = new RegExp(escapeRegex(name.trim()), 'i');
 
   const [totalCount, items] = await Promise.all([
     User.countDocuments(filter),
-    User.find(filter).sort({ lastActiveAt: -1, _id: 1 }).skip(offset).limit(limit).lean().exec(),
+    User.find(filter).sort(STUDENT_SORTS[sortBy] ?? STUDENT_SORTS.RECENTLY_ACTIVE).skip(offset).limit(limit).lean().exec(),
   ]);
   return { totalCount, items };
+}
+
+/** Facets for filter UIs: the areas, skills, designations and programs that actually exist, most common first. */
+async function filterOptions(_, { role }) {
+  const toFacet = (rows) => rows.map((r) => ({ value: r._id, count: r.count }));
+  const top = [{ $group: { _id: '$v', count: { $sum: 1 } } }, { $sort: { count: -1, _id: 1 } }, { $limit: 80 }];
+  const [userAreas, labAreas, skills, titles, programs] = await Promise.all([
+    User.aggregate([{ $match: { role } }, { $unwind: '$interests' }, { $project: { v: '$interests' } }, ...top]).then(toFacet),
+    role === 'FACULTY' ? Lab.aggregate([{ $unwind: '$researchAreas' }, { $project: { v: '$researchAreas' } }, ...top]).then(toFacet) : [],
+    User.aggregate([{ $match: { role } }, { $unwind: '$skills' }, { $project: { v: '$skills.name' } }, ...top]).then(toFacet),
+    User.distinct('title', { role: 'FACULTY', title: { $nin: [null, ''] } }),
+    User.distinct('program', { role: 'STUDENT', program: { $nin: [null, ''] } }),
+  ]);
+  const areaCounts = new Map();
+  for (const { value, count } of [...userAreas, ...labAreas]) areaCounts.set(value, (areaCounts.get(value) ?? 0) + count);
+  const areas = [...areaCounts].map(([value, count]) => ({ value, count })).sort((a, b) => b.count - a.count || a.value.localeCompare(b.value));
+  const TITLE_ORDER = ['Professor & Head', 'Professor', 'Professor Emeritus', 'Associate Professor', 'Assistant Professor', 'Adjunct Professor', 'Visiting Faculty'];
+  const rank = (t) => TITLE_ORDER.indexOf(t) + 1 || 99;
+  return {
+    areas,
+    skills,
+    titles: titles.sort((a, b) => rank(a) - rank(b) || a.localeCompare(b)),
+    programs: programs.sort(),
+  };
+}
+
+/** Open projects ranked for the logged-in student by required-skill coverage and topic fit. */
+async function recommendedProjects(_, { limit }, ctx) {
+  const me = requireUser(ctx);
+  const projects = await Project.find({ isOpen: true, owner: { $ne: me._id }, members: { $ne: me._id } }).limit(300).lean().exec();
+  const seeker = [{ id: me._id, skills: me.skills, interests: me.interests }];
+  return projects
+    .filter((p) => (p.members?.length ?? 0) < p.maxMembers)
+    .map((p) => {
+      const [r] = rankStudentsForProject(p, seeker, { limit: 1 });
+      return { project: p, score: r.score, reasons: r.reasons };
+    })
+    .filter((r) => r.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, clampLimit(limit, 30));
 }
 
 async function recommendedMentors(_, { limit, weights }, ctx) {
@@ -152,8 +229,9 @@ export const Query = {
   },
   lab: (_, { id }, { loaders }) => loaders.lab.load(oid(id)),
 
-  projects: (_, { status, openOnly, tag, limit }) => {
+  projects: (_, { status, openOnly, tag, mine, limit }, ctx) => {
     const f = {};
+    if (mine) f.owner = requireUser(ctx)._id;
     if (status) f.status = status;
     if (openOnly) f.isOpen = true;
     if (tag) f.$or = [{ tags: tag.toLowerCase() }, { requiredSkills: tag.toLowerCase() }];
@@ -165,6 +243,8 @@ export const Query = {
   searchStudents,
   recommendedMentors,
   recommendedStudentsForProject,
+  recommendedProjects,
+  filterOptions,
 
   myJoinRequests: (_, { direction, status }, ctx) => {
     const me = requireUser(ctx);
@@ -185,16 +265,62 @@ export const Query = {
   },
 
   adminStats: async () => {
-    const [users, students, faculty, labs, openProjects, pendingRequests, unattachedStudents] = await Promise.all([
+    const [users, students, faculty, admins, labs, openProjects, unattachedStudents, pendingVerifications, reqAgg, labAgg, active] = await Promise.all([
       User.countDocuments(),
       User.countDocuments({ role: 'STUDENT' }),
       User.countDocuments({ role: 'FACULTY' }),
+      User.countDocuments({ role: 'ADMIN' }),
       Lab.countDocuments(),
       Project.countDocuments({ isOpen: true }),
-      JoinRequest.countDocuments({ status: 'PENDING' }),
       User.countDocuments({ role: 'STUDENT', lab: null }),
+      User.countDocuments({ role: 'FACULTY', verification: 'PENDING' }),
+      JoinRequest.aggregate([{ $group: { _id: '$status', n: { $sum: 1 } } }]),
+      Lab.aggregate([{ $group: { _id: null, capacity: { $sum: '$capacity' }, filled: { $sum: { $size: '$members' } } } }]),
+      activeResearcherIds(),
     ]);
-    return { users, students, faculty, labs, openProjects, pendingRequests, unattachedStudents };
+    const req = Object.fromEntries(reqAgg.map((r) => [r._id, r.n]));
+    return {
+      users, students, faculty, admins, labs, openProjects, unattachedStudents, pendingVerifications,
+      pendingRequests: req.PENDING ?? 0,
+      activeResearchers: await User.countDocuments({ role: 'FACULTY', _id: { $in: active } }),
+      totalCapacity: labAgg[0]?.capacity ?? 0,
+      filledSeats: labAgg[0]?.filled ?? 0,
+      requests: { pending: req.PENDING ?? 0, accepted: req.ACCEPTED ?? 0, rejected: req.REJECTED ?? 0, withdrawn: req.WITHDRAWN ?? 0 },
+    };
   },
+
+  departmentStats: async () => {
+    const [departments, userAgg, labAgg, active, openProjects] = await Promise.all([
+      Department.find().sort({ name: 1 }).lean().exec(),
+      User.aggregate([{ $group: { _id: { d: '$department', r: '$role' }, n: { $sum: 1 } } }]),
+      Lab.aggregate([{ $group: { _id: '$department', labs: { $sum: 1 }, open: { $sum: '$openSlots' } } }]),
+      activeResearcherIds(),
+      Project.find({ isOpen: true }).select('owner').lean().exec(),
+    ]);
+    const [activeFaculty, owners] = await Promise.all([
+      User.find({ role: 'FACULTY', _id: { $in: active } }).select('department').lean().exec(),
+      User.find({ _id: { $in: openProjects.map((p) => p.owner) } }).select('department').lean().exec(),
+    ]);
+    const countBy = (list) => list.reduce((m, u) => m.set(String(u.department), (m.get(String(u.department)) ?? 0) + 1), new Map());
+    const activeBy = countBy(activeFaculty);
+    const ownerDept = new Map(owners.map((o) => [String(o._id), String(o.department)]));
+    const projBy = countBy(openProjects.map((p) => ({ department: ownerDept.get(String(p.owner)) })));
+    const roleCount = (d, r) => userAgg.find((x) => String(x._id.d) === String(d) && x._id.r === r)?.n ?? 0;
+    return departments.map((d) => {
+      const l = labAgg.find((x) => String(x._id) === String(d._id));
+      return {
+        department: d,
+        faculty: roleCount(d._id, 'FACULTY'),
+        students: roleCount(d._id, 'STUDENT'),
+        labs: l?.labs ?? 0,
+        openSlots: l?.open ?? 0,
+        activeResearchers: activeBy.get(String(d._id)) ?? 0,
+        openProjects: projBy.get(String(d._id)) ?? 0,
+      };
+    });
+  },
+
+  pendingVerifications: () => User.find({ role: 'FACULTY', verification: 'PENDING' }).sort({ createdAt: 1 }).lean().exec(),
+  recentJoinRequests: (_, { limit }) => JoinRequest.find().sort({ createdAt: -1 }).limit(clampLimit(limit, 100)).lean().exec(),
   allUsers: (_, { role, limit }) => User.find(role ? { role } : {}).sort({ createdAt: -1 }).limit(clampLimit(limit, 500)).lean().exec(),
 };

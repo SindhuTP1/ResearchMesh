@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useMutation, useQuery } from '@apollo/client/react';
-import { ME, LAB_DASHBOARD, UPDATE_LAB, CREATE_LAB, ADD_GRANT, DEPARTMENTS, RESPOND_TO_REQUEST } from '../graphql/operations.js';
-import { Loading, ErrorNote, Empty, UserLink, Status, Skills, useToast, errorText, csv, timeAgo } from '../components/ui.jsx';
+import { useNavigate } from 'react-router-dom';
+import { ME, LAB_DASHBOARD, UPDATE_LAB, CREATE_LAB, ADD_GRANT, DEPARTMENTS, RESPOND_TO_REQUEST, OPEN_LAB_CHAT } from '../graphql/operations.js';
+import { Loading, ErrorNote, Empty, UserLink, Status, Skills, useToast, errorText, csv, timeAgo, confetti } from '../components/ui.jsx';
 
 const money = (n, c = 'INR') => new Intl.NumberFormat('en-IN', { style: 'currency', currency: c, maximumFractionDigits: 0 }).format(n);
 
@@ -85,20 +86,35 @@ function GrantForm({ labId }) {
 }
 
 export function RequestActions({ request, refetch }) {
+  // Either way the other person is the requester: the student who applied, or the owner who invited you.
+  const who = request.requester.name;
   const toast = useToast();
   const [respond, { loading }] = useMutation(RESPOND_TO_REQUEST);
-  const go = async (accept) => {
+  const go = async (accept, e) => {
+    const rect = e?.currentTarget?.getBoundingClientRect();
     try {
       await respond({ variables: { id: request.id, accept } });
-      toast({ kind: 'ok', title: accept ? 'Accepted' : 'Declined', body: `${request.requester.name} has been notified.` });
+      if (accept) confetti(rect ? rect.left + rect.width / 2 : undefined, rect ? rect.top : undefined);
+      toast({ kind: 'ok', title: accept ? 'Accepted' : 'Declined', body: accept ? `You and ${who} are now connected and can message each other.` : `${who} has been notified.` });
       refetch?.();
     } catch (e) { toast({ kind: 'error', title: 'Could not respond', body: errorText(e) }); }
   };
   return (
     <div className="row">
-      <button className="btn btn-primary btn-sm" disabled={loading} onClick={() => go(true)}>Accept</button>
-      <button className="btn btn-sm" disabled={loading} onClick={() => go(false)}>Decline</button>
+      <button className="btn btn-primary btn-sm" disabled={loading} onClick={(e) => go(true, e)}>Accept</button>
+      <button className="btn btn-sm" disabled={loading} onClick={(e) => go(false, e)}>Decline</button>
     </div>
+  );
+}
+
+function LabChatButton({ labId }) {
+  const navigate = useNavigate();
+  const toast = useToast();
+  const [open, { loading }] = useMutation(OPEN_LAB_CHAT);
+  return (
+    <button className="btn btn-sm" disabled={loading} title="A group chat with you and every lab member" onClick={() => open({ variables: { labId } })
+      .then(({ data }) => navigate(`/messages/${data.openLabConversation.id}`))
+      .catch((e) => toast({ kind: 'error', title: 'Chat not opened', body: errorText(e) }))}>Lab group chat</button>
   );
 }
 
@@ -120,7 +136,10 @@ export default function MyLab() {
           <h1>{lab.name}</h1>
           <p className="muted">{lab.department.name}. {lab.researchAreas.join(', ')}.</p>
         </div>
-        <SlotsEditor lab={lab} key={lab.openSlots} />
+        <div className="row">
+          <LabChatButton labId={lab.id} />
+          <SlotsEditor lab={lab} key={lab.openSlots} />
+        </div>
       </div>
 
       <div className="stats" style={{ marginBottom: 16 }}>

@@ -1,8 +1,9 @@
 import bcrypt from 'bcryptjs';
 import mongoose from 'mongoose';
-import { User, Lab, Project, Publication, Grant, JoinRequest, Notification, Department } from '../../models/index.js';
-import { signToken, requireUser, forbidden, badInput, hasRole } from '../../auth.js';
+import { User, Lab, Project, Publication, Grant, JoinRequest, Notification, Department, ConnectionRequest, Conversation } from '../../models/index.js';
+import { signToken, requireUser, forbidden, badInput, hasRole, checkAdminSignupCode } from '../../auth.js';
 import { notify, publishJoinRequest, notifyMatchingStudents } from '../../services/notify.js';
+import { connectUsers, syncProjectChat, syncLabChat } from '../../services/chat.js';
 
 const oid = (id) => {
   if (!mongoose.isValidObjectId(id)) throw badInput(`Invalid id: ${id}`);
@@ -17,28 +18,43 @@ const background = (promise) => promise.catch((e) => console.error('background t
 export const Mutation = {
   /* ------------------------------- auth ------------------------------- */
   async register(_, { input }) {
-    const { name, email, password, role, departmentId, program, title } = input;
-    if (role === 'ADMIN') throw forbidden('Admins cannot self-register');
+    const { name, email, password, role, departmentId, program, yearOfStudy, title, adminCode } = input;
+    if (!name?.trim()) throw badInput('Name is required');
     if (password.length < 8) throw badInput('Password must be at least 8 characters');
     if (!/^\S+@\S+\.\S+$/.test(email)) throw badInput('Invalid email');
+    if (role === 'ADMIN' && !checkAdminSignupCode(adminCode)) throw forbidden('A valid admin access code is required to create an admin account');
+    if (role === 'FACULTY' && !departmentId) throw badInput('Faculty must choose a department');
     if (await User.exists({ email: email.toLowerCase() })) throw badInput('Email already registered');
     if (departmentId && !(await Department.exists({ _id: oid(departmentId) }))) throw badInput('Unknown department');
+    if (yearOfStudy != null && (yearOfStudy < 1 || yearOfStudy > 8)) throw badInput('Year of study must be between 1 and 8');
 
     const user = await User.create({
-      name,
+      name: name.trim(),
       email,
       role,
       passwordHash: await bcrypt.hash(password, 10),
       department: departmentId ? oid(departmentId) : undefined,
-      program,
-      title,
+      ...(role === 'STUDENT' ? { program, yearOfStudy } : {}),
+      ...(role === 'FACULTY' ? { title, verification: 'PENDING' } : {}),
     });
+
+    if (role === 'FACULTY') {
+      // Let every admin know there's someone to verify.
+      const admins = await User.find({ role: 'ADMIN' }).select('_id').lean();
+      for (const a of admins) {
+        background(notify({ recipient: a._id, type: 'ACCOUNT_UPDATE', message: `${user.name} registered as faculty and is waiting for verification`, actor: user._id }));
+      }
+    }
     return { token: signToken(user), user: user.toObject() };
   },
 
-  async login(_, { email, password }) {
+  async login(_, { email, password, role }) {
     const user = await User.findOne({ email: email.toLowerCase() }).select('+passwordHash');
     if (!user || !(await bcrypt.compare(password, user.passwordHash))) throw badInput('Invalid email or password');
+    if (role && user.role !== role) {
+      const label = { STUDENT: 'student', FACULTY: 'faculty', ADMIN: 'admin' };
+      throw forbidden(`This account is registered as ${label[user.role]}, not ${label[role]}. Choose "${label[user.role]}" to log in.`);
+    }
     user.lastActiveAt = new Date();
     await user.save();
     const plain = user.toObject();
@@ -63,20 +79,6 @@ export const Mutation = {
     }
     update.lastActiveAt = new Date();
     return User.findByIdAndUpdate(me._id, update, { new: true, runValidators: true }).lean().exec();
-  },
-
-  async connect(_, { userId }, ctx) {
-    const me = requireUser(ctx);
-    const other = oid(userId);
-    if (String(other) === me.id) throw badInput("You can't connect with yourself");
-    if (!(await User.exists({ _id: other }))) throw badInput('User not found');
-    const already = (me.connections ?? []).some((c) => String(c) === String(other));
-    await User.updateOne({ _id: me._id }, { $addToSet: { connections: other } });
-    await User.updateOne({ _id: other }, { $addToSet: { connections: me._id } });
-    if (!already) {
-      background(notify({ recipient: other, type: 'NEW_CONNECTION', message: `${me.name} connected with you`, actor: me._id }));
-    }
-    return User.findById(other).lean().exec();
   },
 
   /* ------------------------------ projects ---------------------------- */
@@ -132,6 +134,16 @@ export const Mutation = {
       );
     }
     return project.toObject();
+  },
+
+  async deleteProject(_, { id }, ctx) {
+    const me = requireUser(ctx);
+    const project = await Project.findById(oid(id)).lean().exec();
+    if (!project) throw badInput('Project not found');
+    if (!isOwnerOrAdmin(project.owner, me)) throw forbidden('Only the owner or an admin can delete this project');
+    await Project.deleteOne({ _id: project._id });
+    await JoinRequest.updateMany({ project: project._id, status: 'PENDING' }, { status: 'WITHDRAWN' });
+    return true;
   },
 
   /* -------------------------------- labs ------------------------------ */
@@ -237,6 +249,9 @@ export const Mutation = {
       doc.lab = l._id;
     }
 
+    if (targetType === 'PROJECT' && (await JoinRequest.exists({ kind: 'INVITE', recipient: me._id, project: doc.project, status: 'PENDING' }))) {
+      throw badInput("You've already been invited to this project — accept the invite from your requests");
+    }
     const dupFilter = { requester: me._id, status: 'PENDING', ...(targetType === 'PROJECT' ? { project: doc.project } : { lab: doc.lab, targetType: 'LAB' }) };
     if (await JoinRequest.exists(dupFilter)) throw badInput('You already have a pending request');
 
@@ -260,6 +275,10 @@ export const Mutation = {
     if (!jr) throw badInput('Request not found');
     if (!isOwnerOrAdmin(jr.recipient, me)) throw forbidden('Only the recipient can respond');
     if (jr.status !== 'PENDING') throw badInput(`Request already ${jr.status.toLowerCase()}`);
+    const isInvite = jr.kind === 'INVITE';
+    // For a request the requester joins; for an invite the person invited (recipient) joins.
+    const joiner = isInvite ? jr.recipient : jr.requester;
+    const other = isInvite ? jr.requester : jr.recipient;
 
     let label = 'your request';
     if (accept) {
@@ -267,7 +286,7 @@ export const Mutation = {
         // Atomic seat check: only add if still under maxMembers.
         const p = await Project.findOneAndUpdate(
           { _id: jr.project, $expr: { $lt: [{ $size: '$members' }, '$maxMembers'] } },
-          { $addToSet: { members: jr.requester } },
+          { $addToSet: { members: joiner } },
           { new: true }
         );
         if (!p) throw badInput('Project is full');
@@ -297,10 +316,18 @@ export const Mutation = {
 
     jr.status = accept ? 'ACCEPTED' : 'REJECTED';
     await jr.save();
+    if (accept) {
+      // Working together → connected, so they can message each other straight away.
+      await connectUsers(joiner, other);
+      if (jr.targetType === 'PROJECT') await syncProjectChat(jr.project, joiner, me.name);
+      else await syncLabChat(jr.lab, joiner, me.name);
+    }
     await notify({
-      recipient: jr.requester,
+      recipient: other,
       type: accept ? 'REQUEST_ACCEPTED' : 'REQUEST_REJECTED',
-      message: accept ? `${me.name} accepted you into ${label} 🎉` : `${me.name} declined your request to join ${label}`,
+      message: isInvite
+        ? accept ? `${me.name} accepted your invite to ${label} 🎉 You're now connected.` : `${me.name} declined your invite to ${label}`
+        : accept ? `${me.name} accepted you into ${label} 🎉 You're now connected — say hi in Messages.` : `${me.name} declined your request to join ${label}`,
       actor: me._id,
       project: jr.project,
       lab: jr.lab,
@@ -332,8 +359,11 @@ export const Mutation = {
   },
 
   /* -------------------------------- admin ----------------------------- */
-  async setUserRole(_, { userId, role }) {
-    const u = await User.findByIdAndUpdate(oid(userId), { role }, { new: true }).lean().exec();
+  async setUserRole(_, { userId, role }, ctx) {
+    if (String(userId) === ctx.user.id) throw badInput("You can't change your own role");
+    // Promoting someone to faculty is itself an admin decision, so they count as verified.
+    const update = role === 'FACULTY' ? { role, verification: 'VERIFIED' } : { role };
+    const u = await User.findByIdAndUpdate(oid(userId), update, { new: true }).lean().exec();
     if (!u) throw badInput('User not found');
     return u;
   },
@@ -349,7 +379,35 @@ export const Mutation = {
       Project.updateMany({ members: id }, { $pull: { members: id } }),
       JoinRequest.deleteMany({ $or: [{ requester: id }, { recipient: id }] }),
       Notification.deleteMany({ recipient: id }),
+      ConnectionRequest.deleteMany({ $or: [{ from: id }, { to: id }] }),
+      Conversation.updateMany({ members: id }, { $pull: { members: id, admins: id } }),
     ]);
     return true;
+  },
+
+  async verifyFaculty(_, { userId, approve }, ctx) {
+    const u = await User.findOne({ _id: oid(userId), role: 'FACULTY' });
+    if (!u) throw badInput('Faculty member not found');
+    u.verification = approve ? 'VERIFIED' : 'REJECTED';
+    await u.save();
+    background(
+      notify({
+        recipient: u._id,
+        type: 'ACCOUNT_UPDATE',
+        message: approve
+          ? 'Your faculty account has been verified. Students now see the verified badge on your profile.'
+          : 'Your faculty verification was declined. Please contact the platform admin.',
+        actor: ctx.user._id,
+      })
+    );
+    return u.toObject();
+  },
+
+  async createDepartment(_, { name, code }) {
+    const n = name.trim();
+    const c = code.trim().toUpperCase();
+    if (!n || !/^[A-Z]{2,8}$/.test(c)) throw badInput('Give a name and a 2–8 letter code');
+    if (await Department.exists({ $or: [{ name: n }, { code: c }] })) throw badInput('A department with that name or code already exists');
+    return (await Department.create({ name: n, code: c })).toObject();
   },
 };

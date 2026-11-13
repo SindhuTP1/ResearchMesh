@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { Avatar, Skills, Interests } from './ui.jsx';
+import { Avatar, Skills, Interests, VerifiedBadge } from './ui.jsx';
 
 /** Compact person row used by search results — renders only the UserCard fragment fields. */
 export default function PersonRow({ user, highlightSkills = [], highlightArea = '', side }) {
@@ -12,7 +12,7 @@ export default function PersonRow({ user, highlightSkills = [], highlightArea = 
     <div className="person">
       <Avatar user={user} />
       <div>
-        <Link className="name" to={`/people/${user.id}`}>{user.name}</Link>
+        <Link className="name" to={`/people/${user.id}`}>{user.name}</Link> <VerifiedBadge user={user} />
         <div className="sub">{sub.join(', ')}</div>
         <Interests items={user.interests} highlight={highlightArea} />
         <Skills skills={user.skills} highlight={highlightSkills} max={6} />

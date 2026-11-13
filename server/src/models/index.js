@@ -45,6 +45,8 @@ const userSchema = new Schema(
     lookingFor: { type: [String], enum: ['MENTOR', 'LAB', 'COLLABORATOR', 'PROJECT'], default: [] },
     // Faculty-only
     title: { type: String }, // e.g. "Associate Professor"
+    // Faculty accounts are verified by an admin before they carry the "verified" badge.
+    verification: { type: String, enum: ['PENDING', 'VERIFIED', 'REJECTED'], default: 'VERIFIED', index: true },
     lastActiveAt: { type: Date, default: Date.now },
   },
   { timestamps: true }
@@ -137,6 +139,9 @@ const joinRequestSchema = new Schema(
     recipient: { type: ObjectId, ref: 'User', required: true, index: true }, // owner / lab head
     message: { type: String, default: '' },
     status: { type: String, enum: ['PENDING', 'ACCEPTED', 'REJECTED', 'WITHDRAWN'], default: 'PENDING', index: true },
+    // REQUEST: requester asks to join, recipient (owner) decides.
+    // INVITE: owner (requester) invites recipient, recipient decides and becomes the member.
+    kind: { type: String, enum: ['REQUEST', 'INVITE'], default: 'REQUEST' },
   },
   { timestamps: true }
 );
@@ -149,7 +154,7 @@ const notificationSchema = new Schema(
     recipient: { type: ObjectId, ref: 'User', required: true, index: true },
     type: {
       type: String,
-      enum: ['JOIN_REQUEST', 'REQUEST_ACCEPTED', 'REQUEST_REJECTED', 'MATCHING_OPENING', 'NEW_CONNECTION'],
+      enum: ['JOIN_REQUEST', 'REQUEST_ACCEPTED', 'REQUEST_REJECTED', 'MATCHING_OPENING', 'NEW_CONNECTION', 'ACCOUNT_UPDATE', 'CONNECTION_REQUEST', 'PROJECT_INVITE'],
       required: true,
     },
     message: { type: String, required: true },
@@ -163,6 +168,78 @@ const notificationSchema = new Schema(
 );
 notificationSchema.index({ recipient: 1, createdAt: -1 });
 
+/* ------------------------------------------------------------------ */
+/* ConnectionRequest — someone asks to connect; the other accepts      */
+/* ------------------------------------------------------------------ */
+const connectionRequestSchema = new Schema(
+  {
+    from: { type: ObjectId, ref: 'User', required: true, index: true },
+    to: { type: ObjectId, ref: 'User', required: true, index: true },
+    message: { type: String, default: '', maxlength: 500 },
+    status: { type: String, enum: ['PENDING', 'ACCEPTED', 'REJECTED', 'WITHDRAWN'], default: 'PENDING', index: true },
+  },
+  { timestamps: true }
+);
+connectionRequestSchema.index({ from: 1, to: 1, status: 1 });
+
+/* ------------------------------------------------------------------ */
+/* Conversation — a 1:1 chat or a group chat                          */
+/* ------------------------------------------------------------------ */
+const conversationSchema = new Schema(
+  {
+    type: { type: String, enum: ['DIRECT', 'GROUP'], required: true },
+    name: { type: String, trim: true, maxlength: 80 },
+    description: { type: String, default: '', maxlength: 500 },
+    members: [{ type: ObjectId, ref: 'User', index: true }],
+    admins: [{ type: ObjectId, ref: 'User' }],
+    createdBy: { type: ObjectId, ref: 'User' },
+    // Sorted "idA:idB" for DIRECT chats, so each pair has exactly one conversation.
+    directKey: { type: String, unique: true, sparse: true },
+    project: { type: ObjectId, ref: 'Project', default: null, index: true },
+    lab: { type: ObjectId, ref: 'Lab', default: null, index: true },
+    lastMessageAt: { type: Date, default: Date.now, index: true },
+    // When each member last read the conversation — drives unread counts.
+    reads: [{ _id: false, user: { type: ObjectId, ref: 'User' }, at: { type: Date } }],
+  },
+  { timestamps: true }
+);
+conversationSchema.index({ members: 1, lastMessageAt: -1 });
+
+/* ------------------------------------------------------------------ */
+/* Message                                                             */
+/* ------------------------------------------------------------------ */
+const messageSchema = new Schema(
+  {
+    conversation: { type: ObjectId, ref: 'Conversation', required: true },
+    sender: { type: ObjectId, ref: 'User', default: null }, // null for SYSTEM messages
+    kind: { type: String, enum: ['TEXT', 'SYSTEM'], default: 'TEXT' },
+    body: { type: String, default: '', maxlength: 4000 },
+    // File stored in GridFS (bucket "attachments"); images are shown inline.
+    attachment: {
+      type: new Schema({ fileId: ObjectId, name: String, mime: String, size: Number }, { _id: false }),
+      default: undefined,
+    },
+    reactions: { type: [new Schema({ emoji: String, users: [{ type: ObjectId, ref: 'User' }] }, { _id: false })], default: [] },
+    editedAt: { type: Date, default: null },
+    deletedAt: { type: Date, default: null },
+  },
+  { timestamps: true }
+);
+messageSchema.index({ conversation: 1, createdAt: -1 });
+
+/* ------------------------------------------------------------------ */
+/* Web Push subscriptions (one per browser) and app settings           */
+/* ------------------------------------------------------------------ */
+const pushSubscriptionSchema = new Schema(
+  {
+    user: { type: ObjectId, ref: 'User', required: true, index: true },
+    endpoint: { type: String, required: true, unique: true },
+    keys: { p256dh: String, auth: String },
+  },
+  { timestamps: true }
+);
+const settingSchema = new Schema({ key: { type: String, unique: true }, value: Schema.Types.Mixed });
+
 export const Department = model('Department', departmentSchema);
 export const User = model('User', userSchema);
 export const Lab = model('Lab', labSchema);
@@ -171,5 +248,10 @@ export const Publication = model('Publication', publicationSchema);
 export const Grant = model('Grant', grantSchema);
 export const JoinRequest = model('JoinRequest', joinRequestSchema);
 export const Notification = model('Notification', notificationSchema);
+export const ConnectionRequest = model('ConnectionRequest', connectionRequestSchema);
+export const Conversation = model('Conversation', conversationSchema);
+export const Message = model('Message', messageSchema);
+export const PushSubscription = model('PushSubscription', pushSubscriptionSchema);
+export const Setting = model('Setting', settingSchema);
 
-export const models = { Department, User, Lab, Project, Publication, Grant, JoinRequest, Notification };
+export const models = { Department, User, Lab, Project, Publication, Grant, JoinRequest, Notification, ConnectionRequest, Conversation, Message, PushSubscription };
