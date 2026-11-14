@@ -205,7 +205,7 @@ const slug = (name) => name.replace(/^Dr\.\s*/, '').toLowerCase().replace(/[^a-z
 
 /**
  * The app's directory is SMALL: 5 faculty and 5 students, enough to try every feature without
- * scrolling past dozens of sample people. The FULL directory (45 faculty, 90 students) is kept
+ * scrolling past dozens of sample people. The FULL directory (44 faculty, 90 students) is kept
  * for the automated tests, which exercise search and ranking edge cases.
  */
 const SMALL_FACULTY = ['Dr. Ananya Rao', 'Dr. Suresh Babu', 'Dr. Rajesh Khanna', 'Dr. Rahul Iyer', 'Dr. Priya Raghavan'];
