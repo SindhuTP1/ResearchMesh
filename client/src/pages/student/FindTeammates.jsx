@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery } from '@apollo/client/react';
 import { FIND_TEAMMATES, FILTER_OPTIONS, DEPARTMENTS, MY_PROJECTS, OPEN_PROJECT_CHAT } from '../../graphql/operations.js';
@@ -7,7 +7,7 @@ import { PersonActions } from '../../components/social.jsx';
 import { Avatar, Loading, ErrorNote, Empty, ChipPicker, Skills, Interests, useToast, errorText } from '../../components/ui.jsx';
 
 const PAGE = 15;
-const EMPTY = { interests: [], skills: [], dept: '', years: [], lookingForTeam: false, excludeConnected: false, name: '' };
+const EMPTY = { interests: [], skills: [], dept: '', years: [], lookingForTeam: false, excludeConnected: false, q: '' };
 const PARTS = [
   ['interest', 'Shared interests', 'var(--m-interest)', 0.55],
   ['skill', 'Shared skills', 'var(--m-skill)', 0.25],
@@ -63,6 +63,13 @@ export default function FindTeammates() {
   const { data: opts } = useQuery(FILTER_OPTIONS, { variables: { role: 'STUDENT' } });
   const { data: deptData } = useQuery(DEPARTMENTS);
   const set = (patch) => { setF((x) => ({ ...x, ...patch })); setPage(0); };
+  // Typing in the search bar waits 300 ms before searching, so each keystroke isn't a request.
+  const [q, setQ] = useState('');
+  useEffect(() => {
+    const t = setTimeout(() => set({ q: q.trim() }), 300);
+    return () => clearTimeout(t);
+  }, [q]);
+  const clearAll = () => { setQ(''); set(EMPTY); };
   const input = {
     interests: f.interests.length ? f.interests : null,
     skills: f.skills.length ? f.skills : null,
@@ -70,7 +77,7 @@ export default function FindTeammates() {
     years: f.years.length ? f.years : null,
     lookingForTeam: f.lookingForTeam || null,
     excludeConnected: f.excludeConnected || null,
-    name: f.name.trim() || null,
+    query: f.q || null,
     limit: PAGE,
     offset: page * PAGE,
   };
@@ -87,6 +94,12 @@ export default function FindTeammates() {
         </div>
       </div>
 
+      <form className="teammate-search" role="search" onSubmit={(e) => { e.preventDefault(); set({ q: q.trim() }); }}>
+        <input type="search" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search teammates"
+          placeholder="🔎 Search teammates by name, skill, interest or program — e.g. Python, robotics, Priya" />
+        <button className="btn btn-primary">Search</button>
+      </form>
+
       {starting && <div style={{ marginBottom: 16 }}><NewProject onDone={() => setStarting(false)} /></div>}
       <MyTeams onStart={() => setStarting(true)} />
 
@@ -95,7 +108,6 @@ export default function FindTeammates() {
           <ChipPicker label="Domain / interests (any of)" options={o?.areas ?? []} selected={f.interests} onChange={(interests) => set({ interests })} initial={18} placeholder="Find a domain…" />
           <ChipPicker label="Must know (all of)" options={o?.skills ?? []} selected={f.skills} onChange={(skills) => set({ skills })} initial={18} placeholder="Find a skill…" />
           <div className="form-grid">
-            <label className="field">Name<input value={f.name} onChange={(e) => set({ name: e.target.value })} /></label>
             <label className="field">Department
               <select value={f.dept} onChange={(e) => set({ dept: e.target.value })}>
                 <option value="">All departments</option>
@@ -112,7 +124,7 @@ export default function FindTeammates() {
           <div className="row">
             <label className="check"><input type="checkbox" checked={f.lookingForTeam} onChange={(e) => set({ lookingForTeam: e.target.checked })} />Only people looking for collaborators or a project</label>
             <label className="check"><input type="checkbox" checked={f.excludeConnected} onChange={(e) => set({ excludeConnected: e.target.checked })} />Hide people I'm already connected with</label>
-            {JSON.stringify(f) !== JSON.stringify(EMPTY) && <button type="button" className="btn btn-sm" onClick={() => set(EMPTY)}>Clear filters</button>}
+            {JSON.stringify(f) !== JSON.stringify(EMPTY) && <button type="button" className="btn btn-sm" onClick={clearAll}>Clear search &amp; filters</button>}
           </div>
         </div>
       </section>
@@ -122,7 +134,7 @@ export default function FindTeammates() {
       {result && (
         <>
           <p className="results-meta">{result.totalCount} {result.totalCount === 1 ? 'student' : 'students'}{loading && ' — updating…'}</p>
-          {result.items.length === 0 ? <Empty><p>No students match every filter.</p></Empty> : (
+          {result.items.length === 0 ? <Empty><p>{f.q ? `No students match “${f.q}”${JSON.stringify({ ...f, q: '' }) !== JSON.stringify(EMPTY) ? ' with these filters' : ''}.` : 'No students match every filter.'}</p></Empty> : (
             <div className="people">
               {result.items.map((m) => {
                 const u = m.student;

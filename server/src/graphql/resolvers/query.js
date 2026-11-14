@@ -132,6 +132,68 @@ async function searchStudents(_, { input }) {
   return { totalCount, items };
 }
 
+/**
+ * What the global search looks at for each kind of result. `primary` is the field that ranks first
+ * when it contains the whole query (a name hit beats a bio hit); `sort` breaks ties after that.
+ */
+const SEARCH_SOURCES = {
+  FACULTY: { key: 'faculty', countKey: 'facultyCount', model: User, base: { role: 'FACULTY' }, fields: ['name', 'title', 'bio', 'interests', 'skills.name'], primary: 'name', sort: { lastActiveAt: -1 } },
+  STUDENT: { key: 'students', countKey: 'studentCount', model: User, base: { role: 'STUDENT' }, fields: ['name', 'program', 'bio', 'interests', 'skills.name'], primary: 'name', sort: { lastActiveAt: -1 } },
+  PROJECT: { key: 'projects', countKey: 'projectCount', model: Project, base: {}, fields: ['title', 'description', 'tags', 'requiredSkills'], primary: 'title', sort: { isOpen: -1, updatedAt: -1 } },
+  LAB: { key: 'labs', countKey: 'labCount', model: Lab, base: {}, fields: ['name', 'description', 'researchAreas'], primary: 'name', sort: { openSlots: -1, name: 1 } },
+  PUBLICATION: { key: 'publications', countKey: 'publicationCount', model: Publication, base: {}, fields: ['title', 'venue', 'keywords', 'externalAuthors'], primary: 'title', sort: { year: -1 } },
+};
+const SEARCH_MIN_LENGTH = 2;
+
+/**
+ * search — one box for students and faculty. "python genomics" finds people/projects where BOTH words
+ * appear somewhere (in any of the fields above), so adding words narrows results instead of widening them.
+ */
+async function search(_, { q, type, limit, offset }, ctx) {
+  const me = requireUser(ctx);
+  const query = (q ?? '').trim().slice(0, 100);
+  const empty = Object.fromEntries(Object.values(SEARCH_SOURCES).flatMap((s) => [[s.key, []], [s.countKey, 0]]));
+  if (query.length < SEARCH_MIN_LENGTH) return { query, ...empty };
+
+  const terms = [...new Set(query.toLowerCase().split(/\s+/).filter(Boolean))].slice(0, 6);
+  const take = clampLimit(limit, 50);
+  const skip = Math.max(0, offset ?? 0);
+
+  const run = async ([name, src]) => {
+    const filter = {
+      ...src.base,
+      ...(src.model === User ? { _id: { $ne: me._id } } : {}),
+      $and: terms.map((t) => {
+        const re = new RegExp(escapeRegex(t), 'i');
+        return { $or: src.fields.map((f) => ({ [f]: re })) };
+      }),
+    };
+    const wantItems = !type || type === name;
+    const [count, items] = await Promise.all([
+      src.model.countDocuments(filter),
+      wantItems
+        ? src.model.aggregate([
+          { $match: filter },
+          { $addFields: { _hit: { $regexMatch: { input: { $ifNull: [`$${src.primary}`, ''] }, regex: escapeRegex(query), options: 'i' } } } },
+          { $sort: { _hit: -1, ...src.sort, _id: 1 } },
+          { $skip: type ? skip : 0 },
+          { $limit: take },
+          { $project: { _hit: 0, passwordHash: 0 } },
+        ])
+        : [],
+    ]);
+    return [src, items, count];
+  };
+
+  const rows = await Promise.all(Object.entries(SEARCH_SOURCES).map(run));
+  const out = { query };
+  for (const [src, items, count] of rows) {
+    out[src.key] = items;
+    out[src.countKey] = count;
+  }
+  return out;
+}
+
 /** Facets for filter UIs: the areas, skills, designations and programs that actually exist, most common first. */
 async function filterOptions(_, { role }) {
   const toFacet = (rows) => rows.map((r) => ({ value: r._id, count: r.count }));
@@ -241,6 +303,7 @@ export const Query = {
 
   searchFaculty,
   searchStudents,
+  search,
   recommendedMentors,
   recommendedStudentsForProject,
   recommendedProjects,

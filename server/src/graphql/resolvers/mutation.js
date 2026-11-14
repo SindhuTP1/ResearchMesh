@@ -49,7 +49,7 @@ export const Mutation = {
   },
 
   async login(_, { email, password, role }) {
-    const user = await User.findOne({ email: email.toLowerCase() }).select('+passwordHash');
+    const user = await User.findOne({ email: email.trim().toLowerCase() }).select('+passwordHash');
     if (!user || !(await bcrypt.compare(password, user.passwordHash))) throw badInput('Invalid email or password');
     if (role && user.role !== role) {
       const label = { STUDENT: 'student', FACULTY: 'faculty', ADMIN: 'admin' };

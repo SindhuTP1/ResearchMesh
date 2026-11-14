@@ -95,6 +95,17 @@ function RolePicker({ role, onChange, roles = ROLES, label }) {
 
 const roleFromParam = (p) => ROLES.find((r) => r.slug === p)?.value ?? 'STUDENT';
 
+/** Log in | Sign up switch at the top of both auth forms, keeping the chosen portal. */
+function AuthTabs({ active, role }) {
+  const slug = ROLES.find((r) => r.value === role).slug;
+  return (
+    <nav className="auth-tabs" aria-label="Log in or sign up">
+      <Link to={`/login?as=${slug}`} className={active === 'login' ? 'on' : ''} aria-current={active === 'login' ? 'page' : undefined}>Log in</Link>
+      <Link to={`/register?as=${slug}`} className={active === 'register' ? 'on' : ''} aria-current={active === 'register' ? 'page' : undefined}>Sign up</Link>
+    </nav>
+  );
+}
+
 export function Login() {
   const { login } = useAuth();
   const navigate = useNavigate();
@@ -118,6 +129,7 @@ export function Login() {
     <div className="auth">
       <Intro />
       <section className="auth-form">
+        <AuthTabs active="login" role={role} />
         <h2>Log in</h2>
         <form className="stack" style={{ marginTop: 18 }} onSubmit={submit}>
           <RolePicker label="I'm logging in as" role={role} onChange={(r) => { setRole(r); reset(); }} />
@@ -130,9 +142,10 @@ export function Login() {
           <ErrorNote error={error} />
           <button className="btn btn-primary" disabled={loading}>{loading ? 'Logging in…' : `Log in as ${label}`}</button>
         </form>
-        <p className="muted" style={{ marginTop: 14 }}>
-          New here? <Link to={`/register?as=${ROLES.find((r) => r.value === role).slug}`}>Create a {label} account</Link>
-        </p>
+        <p className="muted" style={{ marginTop: 18 }}>New here?</p>
+        <Link className="btn btn-ghost" style={{ marginTop: 8 }} to={`/register?as=${ROLES.find((r) => r.value === role).slug}`}>
+          Sign up — create a {label} account
+        </Link>
       </section>
     </div>
   );
@@ -167,6 +180,7 @@ export function Register() {
     <div className="auth">
       <Intro />
       <section className="auth-form">
+        <AuthTabs active="register" role={role} />
         <h2>Create your account</h2>
         <form className="stack" style={{ marginTop: 18 }} onSubmit={submit}>
           <RolePicker label="I'm joining as" role={role} onChange={(r) => { setRole(r); reset(); }} />

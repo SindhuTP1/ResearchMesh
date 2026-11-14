@@ -13,6 +13,7 @@ const Profile = lazy(() => import('./pages/Profile.jsx'));
 const ProfileEdit = lazy(() => import('./pages/Profile.jsx').then((m) => ({ default: m.ProfileEdit })));
 const Discover = lazy(() => import('./pages/Discover.jsx'));
 const Requests = lazy(() => import('./pages/Requests.jsx'));
+const Search = lazy(() => import('./pages/Search.jsx'));
 // student
 const StudentDashboard = lazy(() => import('./pages/student/StudentDashboard.jsx'));
 const Matches = lazy(() => import('./pages/Matches.jsx'));
@@ -80,6 +81,7 @@ export default function App() {
         <Route path="requests" element={only(F, <Requests />)} />
 
         {/* student + faculty */}
+        <Route path="search" element={only(SF, <Search />)} />
         <Route path="discover" element={only(SF, <Discover />)} />
         <Route path="projects" element={only(SF, <Projects />)} />
         <Route path="labs" element={only(SF, <Labs />)} />

@@ -19,7 +19,7 @@ Open **http://localhost:5173**.
 
 - `server/.env` holds `MONGODB_URI` (default `mongodb://127.0.0.1:27017/researchmesh`), `JWT_SECRET` and `ADMIN_SIGNUP_CODE`. Copy `server/.env.example` if it's missing.
 - **First start on an empty database** loads the university directory automatically. After that your data is kept: accounts, chats and files survive restarts. `npm run seed` wipes and reloads it.
-- No MongoDB? `npm run dev:memory` runs an in-memory database that resets on every restart.
+- No MongoDB? `npm run dev:memory` runs an embedded MongoDB (nothing to install). Its data is saved in `server/.devdata`, so accounts survive restarts; delete that folder to start fresh.
 - Chat files are stored in MongoDB GridFS (bucket `attachments`), so there is nothing else to configure.
 
 ### Accounts and the three portals

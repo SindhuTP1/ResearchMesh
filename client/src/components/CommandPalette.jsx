@@ -1,13 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@apollo/client/react';
-import { SEARCH_FACULTY, SEARCH_STUDENTS } from '../graphql/operations.js';
+import { GLOBAL_SEARCH } from '../graphql/operations.js';
 import { useAuth } from '../auth/AuthContext.jsx';
 
 /**
- * Ctrl/⌘ + K: jump to any page, or find a person by name.
- * Pages come from the sidebar for the current role; people search uses the existing search queries.
+ * Ctrl/⌘ + K: jump to any page, or find people, projects and labs.
+ * Pages come from the sidebar for the current role; the rest comes from the global search query,
+ * with a last row that opens the full /search page.
  */
+const ICONS = { page: '↳', person: '👤', project: '📁', lab: '🧪', search: '🔎' };
+
 export default function CommandPalette({ nav, open, onClose }) {
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -23,15 +26,19 @@ export default function CommandPalette({ nav, open, onClose }) {
   }))), [nav, user.id]);
 
   const searchPeople = needle.length >= 2 && user.role !== 'ADMIN';
-  const { data: fac } = useQuery(SEARCH_FACULTY, { variables: { input: { name: needle, limit: 5 } }, skip: !searchPeople });
-  const { data: stu } = useQuery(SEARCH_STUDENTS, { variables: { input: { name: needle, limit: 5 } }, skip: !searchPeople || user.role !== 'FACULTY' });
+  const { data, previousData } = useQuery(GLOBAL_SEARCH, { variables: { q: needle, limit: 3 }, skip: !searchPeople });
+  const s = searchPeople ? (data ?? previousData)?.search : null;
+  const hint = (...xs) => xs.filter(Boolean).join(' · ');
 
   const results = [
     ...pages.filter((p) => !needle || p.label.toLowerCase().includes(needle) || p.hint.toLowerCase().includes(needle)),
-    ...(searchPeople ? [...(fac?.searchFaculty.items ?? []), ...(stu?.searchStudents.items ?? [])].map((u) => ({
-      kind: 'person', label: u.name, hint: [u.title || u.program, u.department?.code].filter(Boolean).join(' · '), to: `/people/${u.id}`,
+    ...(s ? [...s.faculty, ...s.students].map((u) => ({
+      kind: 'person', label: u.name, hint: hint(u.title || u.program, u.department?.code), to: `/people/${u.id}`,
     })) : []),
+    ...(s ? s.projects.map((p) => ({ kind: 'project', label: p.title, hint: hint('Project', p.owner.name), to: `/projects/${p.id}` })) : []),
+    ...(s ? s.labs.map((l) => ({ kind: 'lab', label: l.name, hint: hint('Lab', l.department.code), to: `/search?q=${encodeURIComponent(l.name)}&type=LAB` })) : []),
   ].slice(0, 12);
+  if (searchPeople) results.push({ kind: 'search', label: `See all results for “${q.trim()}”`, hint: 'Search', to: `/search?q=${encodeURIComponent(q.trim())}` });
 
   useEffect(() => { setActive(0); }, [needle]);
   if (!open) return null;
@@ -41,7 +48,7 @@ export default function CommandPalette({ nav, open, onClose }) {
     <div className="modal-backdrop palette-backdrop" onClick={onClose}>
       <div className="palette" role="dialog" aria-label="Quick search" onClick={(e) => e.stopPropagation()}>
         <input
-          ref={input} value={q} placeholder="Jump to a page or find someone…" aria-label="Search"
+          ref={input} value={q} placeholder={user.role === 'ADMIN' ? 'Jump to a page…' : 'Jump to a page, or search people, projects, labs…'} aria-label="Search"
           onChange={(e) => setQ(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'Escape') onClose();
@@ -55,7 +62,7 @@ export default function CommandPalette({ nav, open, onClose }) {
           {results.map((r, i) => (
             <li key={`${r.kind}-${r.to}`} role="option" aria-selected={i === active} className={i === active ? 'on' : ''}
               onMouseEnter={() => setActive(i)} onClick={() => go(r)}>
-              <span className="pal-icon" aria-hidden="true">{r.kind === 'person' ? '👤' : '↳'}</span>
+              <span className="pal-icon" aria-hidden="true">{ICONS[r.kind]}</span>
               <span>{r.label}</span>
               <span className="faint">{r.hint}</span>
             </li>

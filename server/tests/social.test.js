@@ -88,6 +88,16 @@ test('find teammates: same domain ranks first, unrelated student ranks low', asy
     assert.ok(m.student.interests.includes('devops'));
     assert.ok(m.student.lookingFor.some((x) => ['COLLABORATOR', 'PROJECT'].includes(x)));
   }
+
+  // One search box: matches a name, a skill or an interest, case-insensitively.
+  const search = async (q) => ok(await gql(`query($q:String){ findTeammates(input:{ query:$q, limit:100 }) { totalCount items { student { id name interests skills { name } } } } }`, { q }, t.asha)).findTeammates;
+  const byName = await search('ben');
+  assert.ok(byName.items.some((m) => m.student.id === id.ben), 'finds Ben by part of his name');
+  const bySkill = await search('KUBERNETES');
+  assert.ok(bySkill.items.length > 0 && bySkill.items.every((m) => m.student.skills.some((s) => /kubernetes/i.test(s.name)) || /kubernetes/i.test(m.student.name) || m.student.interests.some((i) => /kubernetes/i.test(i))), 'skill search, any case');
+  assert.ok(bySkill.items.some((m) => m.student.id === id.ben));
+  const none = await search('zzz-no-such-thing');
+  assert.equal(none.totalCount, 0);
 });
 
 test('chat needs a connection: request → accept → message', async () => {

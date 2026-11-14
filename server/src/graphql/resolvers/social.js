@@ -80,6 +80,10 @@ async function findTeammates(_, { input }, ctx) {
   if (input.programs?.length) filter.program = { $in: input.programs };
   if (input.lookingForTeam) filter.lookingFor = { $in: ['COLLABORATOR', 'PROJECT'] };
   if (input.name?.trim()) filter.name = new RegExp(escapeRegex(input.name.trim()), 'i');
+  if (input.query?.trim()) {
+    const rx = new RegExp(escapeRegex(input.query.trim()), 'i');
+    filter.$or = [{ name: rx }, { 'skills.name': rx }, { interests: rx }, { program: rx }];
+  }
   if (input.excludeConnected) filter._id = { $nin: [me._id, ...(me.connections ?? [])] };
 
   const candidates = await User.find(filter).limit(1000).lean().exec();

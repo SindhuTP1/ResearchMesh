@@ -121,14 +121,14 @@ function LiveUpdates() {
 const NAV = {
   STUDENT: [
     ['Overview', [['/student', 'Dashboard', true]]],
-    ['Find', [['/discover', 'Find faculty'], ['/matches', 'My matches'], ['/teammates', 'Find teammates'], ['/projects', 'Projects'], ['/labs', 'Labs']]],
+    ['Find', [['/search', 'Search'], ['/discover', 'Find faculty'], ['/matches', 'My matches'], ['/teammates', 'Find teammates'], ['/projects', 'Projects'], ['/labs', 'Labs']]],
     ['Talk', [['/messages', 'Messages'], ['/connections', 'Connections']]],
     ['You', [['/applications', 'Applications & invites'], ['/notifications', 'Notifications'], ['/profile', 'Profile']]],
   ],
   FACULTY: [
     ['Overview', [['/faculty', 'Dashboard', true]]],
     ['Your research', [['/my-lab', 'My lab'], ['/my-projects', 'My projects'], ['/publications', 'Publications'], ['/requests', 'Join requests']]],
-    ['Find', [['/students', 'Find students'], ['/discover', 'Faculty directory'], ['/projects', 'All projects']]],
+    ['Find', [['/search', 'Search'], ['/students', 'Find students'], ['/discover', 'Faculty directory'], ['/projects', 'All projects']]],
     ['Talk', [['/messages', 'Messages'], ['/connections', 'Connections']]],
     ['You', [['/notifications', 'Notifications'], ['/profile', 'Profile']]],
   ],
@@ -149,6 +149,26 @@ function VerificationBadge() {
   const { data } = useQuery(PENDING_VERIFICATION_COUNT, { fetchPolicy: 'cache-and-network' });
   const n = data?.adminStats?.pendingVerifications ?? 0;
   return n > 0 ? <span className="badge-live" aria-label={`${n} waiting`}>{n}</span> : null;
+}
+
+const DASHBOARD = { STUDENT: '/student', FACULTY: '/faculty', ADMIN: '/admin' };
+
+/**
+ * "← Back" above every page except the dashboard. Goes to the previous page inside the app, or to
+ * the dashboard when there's nothing to go back to (the first page opened in this tab).
+ */
+function BackBar({ role }) {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const home = DASHBOARD[role];
+  if (location.pathname === home || location.pathname.startsWith('/messages/')) return null;
+  const back = () => (location.key === 'default' ? navigate(home) : navigate(-1));
+  return (
+    <div className="back-bar">
+      <button type="button" className="btn btn-ghost btn-sm" onClick={back}>← Back</button>
+      <Link to={home} className="faint">Dashboard</Link>
+    </div>
+  );
 }
 
 export default function Layout() {
@@ -213,6 +233,7 @@ export default function Layout() {
       </aside>
       <CommandPalette nav={groups} open={palette} onClose={() => setPalette(false)} />
       <main>
+        <BackBar role={user.role} />
         <div key={section} className="page-enter">
           <Outlet />
         </div>

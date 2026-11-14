@@ -31,7 +31,7 @@ export function JoinButton({ project }) {
   );
 }
 
-function ProjectCard({ p }) {
+export function ProjectCard({ p }) {
   return (
     <article className="project">
       <div className="spread">

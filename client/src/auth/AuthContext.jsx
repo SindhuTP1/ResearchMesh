@@ -6,17 +6,21 @@ import { ME } from '../graphql/operations.js';
 const TOKEN_KEY = 'researchmesh.token';
 const AuthCtx = createContext(null);
 
+// The login lives in sessionStorage: it survives a refresh, but every new tab or browser start
+// opens on the login page with the Student / Faculty / Admin choice. Each tab can also hold a
+// different account, which makes testing a student and a faculty side by side easy.
 const readToken = () => {
   try {
-    return localStorage.getItem(TOKEN_KEY);
+    localStorage.removeItem(TOKEN_KEY); // drop logins remembered by older versions
+    return sessionStorage.getItem(TOKEN_KEY);
   } catch {
     return null;
   }
 };
 const writeToken = (t) => {
   try {
-    if (t) localStorage.setItem(TOKEN_KEY, t);
-    else localStorage.removeItem(TOKEN_KEY);
+    if (t) sessionStorage.setItem(TOKEN_KEY, t);
+    else sessionStorage.removeItem(TOKEN_KEY);
   } catch {
     /* storage unavailable — session-only login */
   }
@@ -59,8 +63,16 @@ export function AuthProvider({ children }) {
 }
 
 function CurrentUser({ token, login, logout, children }) {
-  const { data, loading } = useQuery(ME, { skip: !token });
+  const { data, loading, error } = useQuery(ME, { skip: !token });
   const user = token ? data?.me ?? null : null;
+
+  // A saved token can outlive its user (e.g. the in-memory dev DB is re-seeded on every restart,
+  // so old user ids no longer exist). If `me` comes back empty, drop the token and show login
+  // instead of waiting on "Loading…" forever.
+  const staleToken = !!token && !loading && (!!error || (data !== undefined && data.me == null));
+  useEffect(() => {
+    if (staleToken) logout();
+  }, [staleToken, logout]);
   const value = useMemo(
     () => ({
       token,

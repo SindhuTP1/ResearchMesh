@@ -299,3 +299,47 @@ test('students get ranked project recommendations', async () => {
   assert.ok(list.length > 0);
   for (let i = 1; i < list.length; i++) assert.ok(list[i - 1].score >= list[i].score);
 });
+
+test('global search: students and faculty search people, projects, labs and papers', async () => {
+  const Q = `query($q:String!,$t:SearchType,$l:Int,$o:Int){ search(q:$q,type:$t,limit:$l,offset:$o){
+    query facultyCount studentCount projectCount labCount publicationCount
+    faculty { id name role } students { id name role } projects { title } labs { name } publications { title year } } }`;
+
+  // Needs a login.
+  const anon = await gql(Q, { q: 'nlp' });
+  assert.ok(anon.errors?.length, 'anonymous search should be rejected');
+
+  // Students: a topic finds faculty and other kinds of results.
+  const st = await gql(Q, { q: 'nlp' }, { token: tokens.student });
+  assert.equal(st.errors, undefined, JSON.stringify(st.errors));
+  const s = st.data.search;
+  assert.ok(s.facultyCount > 0, 'nlp should match some faculty');
+  assert.ok(s.faculty.length <= 5);
+  for (const f of s.faculty) assert.equal(f.role, 'FACULTY');
+  // The caller is never in their own results, and students still can't read emails through search.
+  assert.ok(!s.students.some((u) => u.name === STUDENT.name));
+  const emails = await gql(`{ search(q:"nlp"){ faculty { email } } }`, {}, { token: tokens.student });
+  assert.ok(emails.errors?.some((e) => /FACULTY/.test(e.message)));
+
+  // A name hit ranks first.
+  const rao = await gql(Q, { q: 'ananya rao' }, { token: tokens.student });
+  assert.equal(rao.data.search.faculty[0]?.name, 'Dr. Ananya Rao');
+
+  // Faculty find the registered student by a skill + interest; every word must match.
+  const fa = await gql(Q, { q: 'legal ai' }, { token: tokens.faculty });
+  assert.ok(fa.data.search.students.some((u) => u.name === STUDENT.name), JSON.stringify(fa.data.search.students));
+  const none = await gql(Q, { q: 'legal zzzunknownzzz' }, { token: tokens.faculty });
+  assert.equal(none.data.search.studentCount, 0);
+
+  // type + offset pages one list; the other lists are empty but counts are still there.
+  const page = await gql(Q, { q: 'nlp', t: 'FACULTY', l: 1, o: 1 }, { token: tokens.student });
+  assert.equal(page.data.search.projects.length, 0);
+  assert.equal(page.data.search.projectCount, s.projectCount);
+  if (s.facultyCount > 1) assert.notEqual(page.data.search.faculty[0].id, s.faculty[0].id);
+
+  // Too short, or regex characters: no crash, no results.
+  const short = await gql(Q, { q: 'a' }, { token: tokens.student });
+  assert.equal(short.data.search.facultyCount, 0);
+  const weird = await gql(Q, { q: '.*(' }, { token: tokens.student });
+  assert.equal(weird.errors, undefined, JSON.stringify(weird.errors));
+});

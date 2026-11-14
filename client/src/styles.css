@@ -319,6 +319,17 @@ textarea { resize: vertical; min-height: 84px; }
 .auth-intro p { max-width: 46ch; margin-top: 18px; color: var(--slate); font-size: 1.05rem; }
 .auth-intro svg.mesh { position: absolute; right: -40px; bottom: -40px; width: 420px; opacity: 0.9; pointer-events: none; }
 .auth-form { padding: 56px; display: flex; flex-direction: column; justify-content: center; max-width: 480px; width: 100%; }
+/* "← Back" above inner pages */
+.back-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+.back-bar .btn { padding-left: 0; }
+/* big search bar on Find teammates */
+.teammate-search { display: flex; gap: 8px; align-items: center; margin-top: 16px; }
+.teammate-search input { flex: 1; min-width: 0; font-size: 1rem; padding: 12px 14px; }
+/* Log in | Sign up tabs */
+.auth-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px; margin-bottom: 22px; border: 1px solid var(--rule); border-radius: 10px; }
+.auth-tabs a { text-align: center; padding: 9px 12px; border-radius: 7px; font-weight: 600; color: var(--ink); text-decoration: none; }
+.auth-tabs a:hover { background: color-mix(in srgb, var(--moss) 10%, transparent); }
+.auth-tabs a.on { background: var(--moss); color: var(--paper); }
 /* portal choice on login / sign-up */
 .role-picker { border: 0; padding: 0; margin: 0; }
 .role-picker legend { font-size: 0.86rem; font-weight: 600; color: var(--slate); margin-bottom: 8px; padding: 0; }
@@ -897,3 +908,20 @@ kbd { font: 600 0.7rem var(--sans); background: var(--rule-soft); border: 1px so
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 1ms !important; animation-iteration-count: 1 !important; transition-duration: 1ms !important; scroll-behavior: auto !important; }
 }
+
+/* ---------- global search ---------- */
+.search-box {
+  display: flex; align-items: center; gap: 10px; margin: 16px 0;
+  border: 1px solid var(--rule); background: var(--paper); border-radius: var(--r-sm);
+  padding: 6px 6px 6px 12px; transition: border-color 160ms, box-shadow 160ms;
+}
+.search-box:focus-within { border-color: var(--moss); box-shadow: 0 0 0 3px var(--moss-soft); }
+.search-box input { flex: 1; min-width: 0; border: 0; background: transparent; padding: 6px 0; box-shadow: none; }
+.search-box input:focus { box-shadow: none; outline: none; }
+.search-box.big { padding: 10px 14px; }
+.search-box.big input { font-size: 1.1rem; }
+.search-box .faint { white-space: nowrap; font-size: 0.82rem; }
+.search-tabs { margin: 4px 0 18px; flex-wrap: wrap; }
+.tab-count { font-size: 0.75rem; opacity: 0.75; margin-left: 2px; }
+.search-section { margin-bottom: 26px; }
+.search-section .panel-title { margin-bottom: 8px; }

@@ -357,6 +357,23 @@ export const typeDefs = /* GraphQL */ `
     items: [User!]!
   }
 
+  enum SearchType { FACULTY STUDENT PROJECT LAB PUBLICATION }
+
+  "One search box across the platform. Counts are always for every type, so tabs can show them."
+  type SearchResults {
+    query: String!
+    faculty: [User!]!
+    facultyCount: Int!
+    students: [User!]!
+    studentCount: Int!
+    projects: [Project!]!
+    projectCount: Int!
+    labs: [Lab!]!
+    labCount: Int!
+    publications: [Publication!]!
+    publicationCount: Int!
+  }
+
   type AuthPayload {
     token: String!
     user: User!
@@ -437,6 +454,8 @@ export const typeDefs = /* GraphQL */ `
     "Hide people you're already connected with"
     excludeConnected: Boolean
     name: String
+    "Free-text search: matches name, a skill, an interest or the program"
+    query: String
     limit: Int = 20
     offset: Int = 0
   }
@@ -565,6 +584,12 @@ export const typeDefs = /* GraphQL */ `
     searchFaculty(input: FacultySearchInput!): UserSearchResult!
     "e.g. students with python + genomics who aren't attached to a lab (faculty only)"
     searchStudents(input: StudentSearchInput!): UserSearchResult! @auth(requires: FACULTY)
+    """
+    Global search for logged-in users. Every word in q must match somewhere (name, interests, skills, bio,
+    tags, keywords…); name/title matches rank first. With 'type', only that list is filled (for paging),
+    but all counts are still returned.
+    """
+    search(q: String!, type: SearchType, limit: Int = 5, offset: Int = 0): SearchResults!
 
     "Ranked mentor recommendations for the logged-in user"
     recommendedMentors(limit: Int = 10, weights: MatchWeightsInput): [FacultyMatch!]!

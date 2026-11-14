@@ -129,6 +129,27 @@ export const SEARCH_STUDENTS = gql`
   }
 `;
 
+/** One box, every kind of result. Counts always come back so tabs can show them. */
+export const GLOBAL_SEARCH = gql`
+  ${USER_CARD}
+  ${PROJECT_CARD}
+  query GlobalSearch($q: String!, $type: SearchType, $limit: Int, $offset: Int) {
+    search(q: $q, type: $type, limit: $limit, offset: $offset) {
+      query
+      facultyCount
+      studentCount
+      projectCount
+      labCount
+      publicationCount
+      faculty { ...UserCard }
+      students { ...UserCard yearOfStudy }
+      projects { ...ProjectCard }
+      labs { id name researchAreas openSlots memberCount department { id code } head { id name role } }
+      publications { id title venue year url doi keywords authors { id name role } externalAuthors }
+    }
+  }
+`;
+
 export const RECOMMENDED_MENTORS = gql`
   ${USER_CARD}
   query RecommendedMentors($limit: Int, $weights: MatchWeightsInput) {
