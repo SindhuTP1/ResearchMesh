@@ -24,6 +24,33 @@ import { PushSubscription } from '../../models/index.js';
 
 export const REACTIONS = ['👍', '❤️', '😂', '🎉', '😮', '🙏', '🔥', '✅'];
 
+/**
+ * STUN finds each browser's public address; TURN relays the media when the two networks can't
+ * reach each other directly (college Wi-Fi, mobile data, strict NATs). Configure TURN with either
+ *   ICE_SERVERS = JSON array of RTCIceServer objects, or
+ *   TURN_URLS = comma-separated turn:/turns: URLs + TURN_USERNAME + TURN_CREDENTIAL
+ */
+const DEFAULT_STUN = [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }];
+function iceServers() {
+  const list = [...DEFAULT_STUN];
+  if (process.env.ICE_SERVERS) {
+    try {
+      const extra = JSON.parse(process.env.ICE_SERVERS);
+      for (const s of Array.isArray(extra) ? extra : [extra]) list.push({ ...s, urls: Array.isArray(s.urls) ? s.urls : [s.urls] });
+    } catch {
+      console.warn('ICE_SERVERS is not valid JSON — ignoring it');
+    }
+  }
+  if (process.env.TURN_URLS) {
+    list.push({
+      urls: process.env.TURN_URLS.split(',').map((u) => u.trim()).filter(Boolean),
+      username: process.env.TURN_USERNAME ?? null,
+      credential: process.env.TURN_CREDENTIAL ?? null,
+    });
+  }
+  return list;
+}
+
 async function loadMessageFor(ctx, id) {
   const me = requireUser(ctx);
   const msg = await Message.findById(oid(id));
@@ -561,6 +588,10 @@ export const social = {
     messages,
     unreadMessageCount,
     pushPublicKey: () => publicKey().catch(() => null),
+    iceServers: (_, __, ctx) => {
+      requireUser(ctx);
+      return iceServers();
+    },
     /** Dashboard "find people": students and faculty whose name contains the text. Never admins or yourself. */
     findPeople: (_, { name, role, limit }, ctx) => {
       const me = requireUser(ctx);

@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { gql } from '@apollo/client';
 import { useApolloClient, useSubscription } from '@apollo/client/react';
-import { CALL_SIGNAL, SEND_CALL_SIGNAL } from '../graphql/operations.js';
+import { CALL_SIGNAL, SEND_CALL_SIGNAL, ICE_SERVERS as ICE_SERVERS_QUERY } from '../graphql/operations.js';
 import { useAuth } from '../auth/AuthContext.jsx';
 import { useToast } from './ui.jsx';
 
@@ -21,13 +21,17 @@ import { useToast } from './ui.jsx';
  * smaller one knows to offer.
  */
 
-const ICE_SERVERS = (() => {
+// Fallback until the server's list (STUN + TURN, see the iceServers query) arrives.
+// VITE_ICE_SERVERS, if set at build time, overrides both.
+const BUILD_ICE = (() => {
   try {
     const v = import.meta.env.VITE_ICE_SERVERS;
     if (v) return JSON.parse(v);
   } catch { /* fall through */ }
-  return [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun1.l.google.com:19302' }];
+  return null;
 })();
+const DEFAULT_ICE = [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun1.l.google.com:19302' }];
+const clean = (list) => list.map(({ urls, username, credential }) => ({ urls, ...(username ? { username } : {}), ...(credential ? { credential } : {}) }));
 const RING_TIMEOUT_MS = 40_000;
 
 const CallCtx = createContext(null);
@@ -57,6 +61,13 @@ async function getMedia(audioOnly = false) {
 export function CallProvider({ children }) {
   const { user } = useAuth();
   const client = useApolloClient();
+  const ice = useRef(BUILD_ICE ?? DEFAULT_ICE);
+  useEffect(() => {
+    if (BUILD_ICE || !user || user.role === 'ADMIN') return;
+    client.query({ query: ICE_SERVERS_QUERY, fetchPolicy: 'network-only' })
+      .then(({ data }) => { if (data?.iceServers?.length) ice.current = clean(data.iceServers); })
+      .catch(() => { /* keep STUN defaults */ });
+  }, [client, user]);
   const toast = useToast();
 
   const [incoming, setIncoming] = useState(null); // { conversationId, callId, from, title }
@@ -72,6 +83,7 @@ export function CallProvider({ children }) {
   const names = useRef(new Map());
   const ringTimer = useRef(null);
   const answerTimer = useRef(null);
+  const endIfAloneRef = useRef(null); // set below; lets createPeer end a 1:1 call that failed to connect
 
   const send = useCallback(
     (input) => client.mutate({ mutation: SEND_CALL_SIGNAL, variables: { input } }).catch(() => {}),
@@ -110,7 +122,7 @@ export function CallProvider({ children }) {
   }, []);
 
   const createPeer = useCallback((peerId) => {
-    const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+    const pc = new RTCPeerConnection({ iceServers: ice.current });
     const local = localRef.current;
     if (local) local.getTracks().forEach((t) => pc.addTrack(t, local));
     // Without local media, still ask to receive so the other side's offer/answer carries their tracks.
@@ -120,13 +132,22 @@ export function CallProvider({ children }) {
     pc.ontrack = (e) => setPeers((p) => ({ ...p, [peerId]: { ...p[peerId], stream: e.streams[0] } }));
     pc.onconnectionstatechange = () => {
       setPeers((p) => (p[peerId] ? { ...p, [peerId]: { ...p[peerId], state: pc.connectionState } } : p));
-      if (pc.connectionState === 'failed') dropPeer(peerId);
+      if (pc.connectionState === 'failed') {
+        toast({
+          kind: 'error',
+          title: `Couldn't connect to ${names.current.get(peerId) ?? 'the other person'}`,
+          body: 'Your networks block direct calls. The site needs a TURN relay server (see the README, "Calls across networks").',
+          ms: 9000,
+        });
+        dropPeer(peerId);
+        endIfAloneRef.current?.();
+      }
     };
     pcs.current.set(peerId, { pc, queue: [] });
     clearTimeout(answerTimer.current);
     setPeers((p) => ({ ...p, [peerId]: { name: names.current.get(peerId) ?? 'Participant', stream: null, state: 'connecting' } }));
     return pcs.current.get(peerId);
-  }, [sendInCall, dropPeer]);
+  }, [sendInCall, dropPeer, toast]);
 
   const flush = async (entry) => {
     for (const c of entry.queue.splice(0)) await entry.pc.addIceCandidate(c).catch(() => {});
@@ -138,6 +159,7 @@ export function CallProvider({ children }) {
       cleanup();
     }
   }, [cleanup, toast]);
+  endIfAloneRef.current = endIfAlone;
 
   /* -------------------------- incoming signals -------------------------- */
   const handleSignal = async (s) => {

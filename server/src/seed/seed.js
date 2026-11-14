@@ -450,20 +450,22 @@ export async function trimDirectory({ quiet = false } = {}) {
 }
 
 /**
- * Every app start: an empty database gets the small directory; a database still holding the old
- * full directory is trimmed to it. Real sign-ups are never touched.
+ * Every app start: make sure the departments exist (sign-up needs them). No sample people are ever
+ * created here — every student, faculty and admin account is a real sign-up.
+ * Adds any department from the list that is missing; never removes or renames existing ones.
  */
-export async function seedIfEmpty(opts = { quiet: false }) {
-  if (await Department.estimatedDocumentCount()) {
-    await trimDirectory(opts);
-    return false;
+export async function ensureDepartments({ quiet = false } = {}) {
+  const have = new Set((await Department.find().select('code').lean()).map((d) => d.code));
+  const missing = DEPARTMENTS.filter((d) => !have.has(d.code));
+  if (missing.length) {
+    await Department.insertMany(missing);
+    if (!quiet) console.log(`🏫 Added departments: ${missing.map((d) => d.code).join(', ')}`);
   }
-  console.log('📦 Empty database — loading the university directory (first run only)…');
-  await seed({ ...opts, small: true });
-  return true;
+  return missing.length;
 }
 
-// Run directly: `node src/seed/seed.js` (or `npm run seed`) — wipes and reloads the small directory.
+// Run directly: `node src/seed/seed.js` (or `npm run seed:sample`) — WIPES the database and loads the
+// small *sample* directory of fake people. Only for demos: real accounts would be deleted.
 if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   const uri = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/researchmesh';
   await mongoose.connect(uri);

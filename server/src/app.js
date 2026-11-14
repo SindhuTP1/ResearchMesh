@@ -1,4 +1,7 @@
 import http from 'node:http';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import express from 'express';
 import cors from 'cors';
 import { WebSocketServer } from 'ws';
@@ -48,7 +51,7 @@ export async function createServer({ port = 4000, corsOrigin = '*' } = {}) {
 
   const apollo = new ApolloServer({
     schema,
-    introspection: true,
+    introspection: process.env.NODE_ENV !== 'production',
     plugins: [
       ApolloServerPluginDrainHttpServer({ httpServer }),
       { async serverWillStart() { return { async drainServer() { await wsCleanup.dispose(); } }; } },
@@ -84,6 +87,30 @@ export async function createServer({ port = 4000, corsOrigin = '*' } = {}) {
       },
     })
   );
+
+  // Production: the same server also serves the built web app (client/dist), so the whole project is
+  // one service on one address — and the browser talks to /graphql, /api and the WebSocket on the
+  // same origin, with no CORS or extra URLs to configure.
+  const dist = process.env.CLIENT_DIST || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../client/dist');
+  if (fs.existsSync(path.join(dist, 'index.html'))) {
+    app.use((_req, res, next) => {
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+      res.setHeader('Permissions-Policy', 'camera=(self), microphone=(self), geolocation=()');
+      next();
+    });
+    app.use(express.static(dist, {
+      index: false,
+      setHeaders(res, file) {
+        // Hashed bundles never change; index.html and the service worker must always be fresh.
+        if (/[\\/]assets[\\/]/.test(file)) res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+        else res.setHeader('Cache-Control', 'no-cache');
+      },
+    }));
+    // Client-side routes (/student, /messages/123 …) all load the app shell.
+    app.get(/^\/(?!graphql|api\/|health).*/, (_req, res) => res.sendFile(path.join(dist, 'index.html'), { headers: { 'Cache-Control': 'no-cache' } }));
+    console.log(`🖥️  Serving the web app from ${dist}`);
+  }
 
   await new Promise((resolve) => httpServer.listen(port, resolve));
   const addr = httpServer.address();

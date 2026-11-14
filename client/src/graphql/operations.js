@@ -102,6 +102,12 @@ export const REGISTER = gql`
   }
 `;
 
+export const ADMIN_EXISTS = gql`
+  query AdminExists {
+    adminExists
+  }
+`;
+
 export const DEPARTMENTS = gql`
   query Departments {
     departments { id name code }
@@ -850,6 +856,12 @@ export const CONVERSATION_READ = gql`
 export const PRESENCE_CHANGED = gql`
   subscription PresenceChanged {
     presenceChanged { userId online }
+  }
+`;
+
+export const ICE_SERVERS = gql`
+  query IceServers {
+    iceServers { urls username credential }
   }
 `;
 
