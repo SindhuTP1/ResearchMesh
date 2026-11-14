@@ -5,13 +5,19 @@
   "scripts": {
     "setup": "npm install && npm --prefix server install && npm --prefix client install",
     "dev": "concurrently -k -n api,web -c green,blue \"npm --prefix server run dev\" \"npm --prefix client run dev\"",
+    "dev:lan": "concurrently -k -n api,web -c green,blue \"npm --prefix server run dev\" \"npm --prefix client run dev:lan\"",
     "dev:memory": "concurrently -k -n api,web -c green,blue \"npm --prefix server run dev:memory\" \"npm --prefix client run dev\"",
-    "seed": "npm --prefix server run seed",
+    "reset:people": "npm --prefix server run reset:people",
+    "seed:sample": "npm --prefix server run seed:sample",
     "build": "npm --prefix client run build",
+    "start": "npm --prefix server start",
     "test": "npm --prefix server test"
   },
   "private": true,
   "devDependencies": {
     "concurrently": "^10.0.6"
+  },
+  "engines": {
+    "node": ">=22"
   }
 }

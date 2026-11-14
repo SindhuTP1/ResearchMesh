@@ -4,6 +4,7 @@
   "description": "ResearchMesh web client — React + Apollo Client",
   "scripts": {
     "dev": "vite",
+    "dev:lan": "vite --mode lan",
     "build": "vite build",
     "preview": "vite preview"
   },
@@ -20,6 +21,7 @@
     "rxjs": "^7.8.2"
   },
   "devDependencies": {
+    "@vitejs/plugin-basic-ssl": "^2.3.0",
     "@vitejs/plugin-react": "^6.1.2",
     "vite": "^8.3.5"
   }

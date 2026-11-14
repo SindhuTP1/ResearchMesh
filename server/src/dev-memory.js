@@ -14,7 +14,8 @@ import { MongoMemoryServer } from 'mongodb-memory-server';
 import { connectDB } from './config/db.js';
 import { createServer } from './app.js';
 import { ensureAdminSignupCode } from './auth.js';
-import { seed, seedIfEmpty } from './seed/seed.js';
+import { ensureDepartments } from './seed/seed.js';
+import { resetPeople } from './seed/resetPeople.js';
 
 // Only one copy can use the dev database folder. If the API port is taken, another copy is
 // almost certainly running: say so plainly instead of crashing inside MongoDB startup.
@@ -25,7 +26,7 @@ const portFree = await new Promise((resolve) => {
 });
 if (!portFree) {
   console.error(`\n❌ Port ${port} is already in use — ResearchMesh is probably already running in another terminal.`);
-  console.error('   Use that one (http://localhost:5173), or stop it with Ctrl+C and start again.\n');
+  console.error('   Use that one (http://localhost:5180), or stop it with Ctrl+C and start again.\n');
   process.exit(1);
 }
 
@@ -36,11 +37,11 @@ const mongod = await MongoMemoryServer.create({
   instance: { dbPath, storageEngine: 'wiredTiger' },
 });
 await connectDB(mongod.getUri('researchmesh'));
-if (process.env.DEV_DB_RESET === '1') await seed({ quiet: false, small: true });
-else await seedIfEmpty();
+if (process.env.DEV_DB_RESET === '1') await resetPeople({ backup: false });
+await ensureDepartments();
 console.log(`💾 Dev database stored in ${dbPath} (kept between restarts)`);
 ensureAdminSignupCode();
-await createServer({ port, corsOrigin: (process.env.CLIENT_ORIGIN || 'http://localhost:5173').split(',') });
+await createServer({ port, corsOrigin: (process.env.CLIENT_ORIGIN || 'http://localhost:5180').split(',') });
 
 const shutdown = async () => {
   await mongod.stop({ doCleanup: false });

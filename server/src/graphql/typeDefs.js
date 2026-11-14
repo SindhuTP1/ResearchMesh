@@ -225,6 +225,13 @@ export const typeDefs = /* GraphQL */ `
     mine: Boolean!
   }
 
+  "A STUN/TURN server for WebRTC calls"
+  type IceServer {
+    urls: [String!]!
+    username: String
+    credential: String
+  }
+
   type ReadReceipt {
     user: User!
     at: DateTime!
@@ -572,6 +579,8 @@ export const typeDefs = /* GraphQL */ `
 
   type Query {
     me: User
+    "True once the single admin account has been created (sign-up page hides the admin option)"
+    adminExists: Boolean!
     user(id: ID!): User
     departments: [Department!]!
     labs(area: String, hasOpenSlots: Boolean): [Lab!]!
@@ -618,6 +627,8 @@ export const typeDefs = /* GraphQL */ `
     unreadMessageCount: Int!
     "VAPID public key for Web Push subscriptions"
     pushPublicKey: String
+    "STUN/TURN servers for voice and video calls (configured on the server, logged-in users only)"
+    iceServers: [IceServer!]!
 
     adminStats: AdminStats! @auth(requires: ADMIN)
     allUsers(role: Role, limit: Int = 50): [User!]! @auth(requires: ADMIN)

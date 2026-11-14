@@ -12,6 +12,19 @@ const oid = (id) => {
 const isOwnerOrAdmin = (ownerId, user) => String(ownerId) === user.id || hasRole(user, 'ADMIN');
 const pick = (obj, keys) => Object.fromEntries(keys.filter((k) => obj[k] !== undefined).map((k) => [k, obj[k]]));
 
+const ONE_ADMIN = 'An admin account already exists. ResearchMesh has exactly one admin — log in as admin instead.';
+
+/** User.create, turning a hit on the unique "one_admin_only" index into a readable error. */
+async function createUnlessSecondAdmin(doc) {
+  try {
+    return await User.create(doc);
+  } catch (e) {
+    if (e.code === 11000 && /one_admin_only/.test(e.message)) throw forbidden(ONE_ADMIN);
+    if (e.code === 11000 && /email/.test(e.message)) throw badInput('Email already registered');
+    throw e;
+  }
+}
+
 /** Run background work (notifications) without blocking the mutation response. */
 const background = (promise) => promise.catch((e) => console.error('background task failed:', e));
 
@@ -22,13 +35,16 @@ export const Mutation = {
     if (!name?.trim()) throw badInput('Name is required');
     if (password.length < 8) throw badInput('Password must be at least 8 characters');
     if (!/^\S+@\S+\.\S+$/.test(email)) throw badInput('Invalid email');
-    if (role === 'ADMIN' && !checkAdminSignupCode(adminCode)) throw forbidden('A valid admin access code is required to create an admin account');
+    if (role === 'ADMIN') {
+      if (await User.exists({ role: 'ADMIN' })) throw forbidden(ONE_ADMIN);
+      if (!checkAdminSignupCode(adminCode)) throw forbidden('A valid admin access code is required to create an admin account');
+    }
     if (role === 'FACULTY' && !departmentId) throw badInput('Faculty must choose a department');
     if (await User.exists({ email: email.toLowerCase() })) throw badInput('Email already registered');
     if (departmentId && !(await Department.exists({ _id: oid(departmentId) }))) throw badInput('Unknown department');
     if (yearOfStudy != null && (yearOfStudy < 1 || yearOfStudy > 8)) throw badInput('Year of study must be between 1 and 8');
 
-    const user = await User.create({
+    const user = await createUnlessSecondAdmin({
       name: name.trim(),
       email,
       role,
@@ -362,6 +378,7 @@ export const Mutation = {
   /* -------------------------------- admin ----------------------------- */
   async setUserRole(_, { userId, role }, ctx) {
     if (String(userId) === ctx.user.id) throw badInput("You can't change your own role");
+    if (role === 'ADMIN') throw forbidden('There can only be one admin, so nobody else can be made admin.');
     // Promoting someone to faculty is itself an admin decision, so they count as verified.
     const update = role === 'FACULTY' ? { role, verification: 'VERIFIED' } : { role };
     const u = await User.findByIdAndUpdate(oid(userId), update, { new: true }).lean().exec();

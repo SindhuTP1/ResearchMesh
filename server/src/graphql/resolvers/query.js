@@ -280,6 +280,7 @@ async function recommendedStudentsForProject(_, { projectId, limit }, ctx) {
 
 export const Query = {
   me: (_, __, { user }) => user,
+  adminExists: async () => !!(await User.exists({ role: 'ADMIN' })),
   user: (_, { id }, { loaders }) => loaders.user.load(oid(id)),
   departments: () => Department.find().sort({ name: 1 }).lean().exec(),
 

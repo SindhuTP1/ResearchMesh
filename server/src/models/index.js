@@ -52,6 +52,9 @@ const userSchema = new Schema(
   { timestamps: true }
 );
 userSchema.index({ 'skills.name': 1 });
+// At most ONE admin account, guaranteed by MongoDB even if two sign-ups race: every admin row indexes
+// as (ADMIN, null), so a second one is a duplicate key. Other roles are outside the partial filter.
+userSchema.index({ role: 1, adminSlot: 1 }, { unique: true, partialFilterExpression: { role: 'ADMIN' }, name: 'one_admin_only' });
 userSchema.index({ interests: 1 });
 userSchema.index({ name: 'text', bio: 'text', interests: 'text' });
 

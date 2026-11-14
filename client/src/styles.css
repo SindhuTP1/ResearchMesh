@@ -943,3 +943,6 @@ kbd { font: 600 0.7rem var(--sans); background: var(--rule-soft); border: 1px so
 .tab-count { font-size: 0.75rem; opacity: 0.75; margin-left: 2px; }
 .search-section { margin-bottom: 26px; }
 .search-section .panel-title { margin-bottom: 8px; }
+
+.muted-option b { color: var(--slate); }
+.muted-option span { font-style: italic; }

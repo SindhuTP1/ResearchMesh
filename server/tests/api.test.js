@@ -343,3 +343,23 @@ test('global search: students and faculty search people, projects, labs and pape
   const weird = await gql(Q, { q: '.*(' }, { token: tokens.student });
   assert.equal(weird.errors, undefined, JSON.stringify(weird.errors));
 });
+
+test('there is only ever one admin', async () => {
+  assert.equal((await gql(`{ adminExists }`)).data.adminExists, true);
+
+  const again = await gql(REGISTER, { i: { name: 'Second Admin', email: 'second.admin@univ.edu', password: 'longenough1', role: 'ADMIN', adminCode: ADMIN_CODE } });
+  assert.equal(again.errors[0].extensions.code, 'FORBIDDEN', 'a second admin sign-up is refused even with the right code');
+  assert.match(again.errors[0].message, /already exists/);
+
+  const studentId = (await gql(`{ me { id } }`, {}, { token: tokens.student })).data.me.id;
+  const promote = await gql(`mutation($u:ID!){ setUserRole(userId:$u, role:ADMIN){ id } }`, { u: studentId }, { token: tokens.admin });
+  assert.equal(promote.errors[0].extensions.code, 'FORBIDDEN', 'nobody can be promoted to admin');
+
+  // The database itself refuses a second admin, whatever the code path.
+  await User.init();
+  await assert.rejects(
+    User.create({ name: 'Sneaky', email: 'sneaky@univ.edu', passwordHash: 'x', role: 'ADMIN' }),
+    (e) => e.code === 11000 && /one_admin_only/.test(e.message)
+  );
+  assert.equal(await User.countDocuments({ role: 'ADMIN' }), 1);
+});

@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery } from '@apollo/client/react';
-import { LOGIN, REGISTER, DEPARTMENTS } from '../graphql/operations.js';
-import { useAuth } from '../auth/AuthContext.jsx';
+import { LOGIN, REGISTER, DEPARTMENTS, ADMIN_EXISTS } from '../graphql/operations.js';
+import { useAuth, lastLogin, rememberLogin, saveCredentialInBrowser } from '../auth/AuthContext.jsx';
 import { ErrorNote } from '../components/ui.jsx';
 import { Logo } from '../components/Layout.jsx';
 import { Typewriter } from '../components/Hero.jsx';
@@ -76,16 +76,16 @@ function Intro() {
 }
 
 /** The portal choice. Login checks the account really has this role. */
-function RolePicker({ role, onChange, roles = ROLES, label }) {
+function RolePicker({ role, onChange, roles = ROLES, label, notes = {} }) {
   return (
     <fieldset className="role-picker">
       <legend>{label}</legend>
       <div className="role-options" role="radiogroup">
         {roles.map((r) => (
-          <label key={r.value} className={`role-option ${role === r.value ? 'on' : ''}`}>
-            <input type="radio" name="role" value={r.value} checked={role === r.value} onChange={() => onChange(r.value)} />
+          <label key={r.value} className={`role-option ${role === r.value ? 'on' : ''} ${notes[r.value] ? 'muted-option' : ''}`}>
+            <input type="radio" name="portal" value={r.value} checked={role === r.value} onChange={() => onChange(r.value)} />
             <b>{r.label}</b>
-            <span>{r.blurb}</span>
+            <span>{notes[r.value] ?? r.blurb}</span>
           </label>
         ))}
       </div>
@@ -110,9 +110,12 @@ export function Login() {
   const { login } = useAuth();
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
-  const role = roleFromParam(params.get('as'));
+  const saved = lastLogin();
+  // No ?as= in the URL → open on the portal this browser last logged into.
+  const role = params.get('as') ? roleFromParam(params.get('as')) : saved?.role ?? 'STUDENT';
   const setRole = (r) => setParams({ as: ROLES.find((x) => x.value === r).slug }, { replace: true });
-  const [form, setForm] = useState({ email: '', password: '' });
+  const [form, setForm] = useState({ email: saved?.role === role ? saved.email : '', password: '' });
+  const [remember, setRemember] = useState(true);
   const [run, { loading, error, reset }] = useMutation(LOGIN);
   const label = ROLES.find((r) => r.value === role).label.toLowerCase();
 
@@ -120,7 +123,9 @@ export function Login() {
     e.preventDefault();
     const { data } = await run({ variables: { ...form, role } }).catch(() => ({}));
     if (data?.login) {
-      login(data.login.token);
+      rememberLogin(remember ? { email: form.email.trim().toLowerCase(), role: data.login.user.role } : null);
+      await saveCredentialInBrowser(form.email.trim().toLowerCase(), form.password, data.login.user.name);
+      login(data.login.token, { remember });
       navigate(HOME_FOR_ROLE[data.login.user.role], { replace: true });
     }
   };
@@ -131,14 +136,23 @@ export function Login() {
       <section className="auth-form">
         <AuthTabs active="login" role={role} />
         <h2>Log in</h2>
-        <form className="stack" style={{ marginTop: 18 }} onSubmit={submit}>
-          <RolePicker label="I'm logging in as" role={role} onChange={(r) => { setRole(r); reset(); }} />
+        <form className="stack" style={{ marginTop: 18 }} onSubmit={submit} method="post" action="/login" id="login-form">
+          <RolePicker label="I'm logging in as" role={role} onChange={(r) => {
+            setRole(r);
+            reset();
+            if (saved?.role === r && !form.email) setForm((f) => ({ ...f, email: saved.email }));
+          }} />
           <label className="field">{role === 'STUDENT' ? 'University email' : 'Email'}
-            <input type="email" autoComplete="email" required value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+            <input type="email" name="email" id="login-email" autoComplete="username" required value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
           </label>
           <label className="field">Password
-            <input type="password" autoComplete="current-password" required value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
+            <input type="password" name="password" id="login-password" autoComplete="current-password" required autoFocus={!!form.email} value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
           </label>
+          <label className="check">
+            <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
+            Remember me on this device
+          </label>
+          <p className="faint" style={{ marginTop: -6 }}>Keeps you signed in and fills in your email next time. Your browser will offer to save the password.</p>
           <ErrorNote error={error} />
           <button className="btn btn-primary" disabled={loading}>{loading ? 'Logging in…' : `Log in as ${label}`}</button>
         </form>
@@ -158,7 +172,10 @@ export function Register() {
   const role = roleFromParam(params.get('as'));
   const setRole = (r) => setParams({ as: ROLES.find((x) => x.value === r).slug }, { replace: true });
   const { data: deptData } = useQuery(DEPARTMENTS);
+  const { data: adminData } = useQuery(ADMIN_EXISTS, { fetchPolicy: 'network-only' });
+  const adminTaken = !!adminData?.adminExists;
   const [form, setForm] = useState({ name: '', email: '', password: '', departmentId: '', program: '', yearOfStudy: '', title: '', adminCode: '' });
+  const [remember, setRemember] = useState(true);
   const [run, { loading, error, reset }] = useMutation(REGISTER);
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
 
@@ -170,7 +187,10 @@ export function Register() {
     if (role === 'ADMIN') input.adminCode = form.adminCode;
     const { data } = await run({ variables: { input } }).catch(() => ({}));
     if (data?.register) {
-      login(data.register.token);
+      const email = form.email.trim().toLowerCase();
+      rememberLogin(remember ? { email, role } : null);
+      await saveCredentialInBrowser(email, form.password, form.name.trim());
+      login(data.register.token, { remember });
       // Students go straight to adding skills and interests: matching is useless without them.
       navigate(role === 'STUDENT' ? '/profile/edit?welcome=1' : HOME_FOR_ROLE[role], { replace: true });
     }
@@ -182,11 +202,18 @@ export function Register() {
       <section className="auth-form">
         <AuthTabs active="register" role={role} />
         <h2>Create your account</h2>
-        <form className="stack" style={{ marginTop: 18 }} onSubmit={submit}>
-          <RolePicker label="I'm joining as" role={role} onChange={(r) => { setRole(r); reset(); }} />
-          <label className="field">Full name<input required autoComplete="name" value={form.name} onChange={set('name')} placeholder={role === 'FACULTY' ? 'Dr. Firstname Lastname' : ''} /></label>
-          <label className="field">{role === 'ADMIN' ? 'Work email' : 'University email'}<input type="email" autoComplete="email" required value={form.email} onChange={set('email')} /></label>
-          <label className="field">Password (8+ characters)<input type="password" autoComplete="new-password" minLength={8} required value={form.password} onChange={set('password')} /></label>
+        <form className="stack" style={{ marginTop: 18 }} onSubmit={submit} method="post" action="/register" id="register-form">
+          <RolePicker label="I'm joining as" role={role} onChange={(r) => { setRole(r); reset(); }}
+            notes={adminTaken ? { ADMIN: 'Already set up — there is only one admin.' } : {}} />
+          {role === 'ADMIN' && adminTaken ? (
+            <div className="banner">
+              <b>The admin account already exists.</b> ResearchMesh has exactly one admin.{' '}
+              <Link to="/login?as=admin">Log in as admin</Link>, or choose Student or Faculty to create a new account.
+            </div>
+          ) : (<>
+          <label className="field">Full name<input required name="name" autoComplete="name" value={form.name} onChange={set('name')} placeholder={role === 'FACULTY' ? 'Dr. Firstname Lastname' : ''} /></label>
+          <label className="field">{role === 'ADMIN' ? 'Work email' : 'University email'}<input type="email" name="email" autoComplete="username" required value={form.email} onChange={set('email')} /></label>
+          <label className="field">Password (8+ characters)<input type="password" name="new-password" autoComplete="new-password" minLength={8} required value={form.password} onChange={set('password')} /></label>
 
           {role !== 'ADMIN' && (
             <label className="field">Department
@@ -231,12 +258,17 @@ export function Register() {
               <label className="field">Admin access code
                 <input required autoComplete="off" value={form.adminCode} onChange={set('adminCode')} placeholder="RM-XXXXXX-XXXXXX" />
               </label>
-              <p className="faint">Admin accounts need the access code configured on the server (<code>ADMIN_SIGNUP_CODE</code>). If it isn't set, the server prints a one-time code in its console when it starts.</p>
+              <p className="faint">There is only one admin account. Creating it needs the access code configured on the server (<code>ADMIN_SIGNUP_CODE</code> in <code>server/.env</code>).</p>
             </>
           )}
 
+          <label className="check">
+            <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
+            Remember me on this device
+          </label>
           <ErrorNote error={error} />
           <button className="btn btn-primary" disabled={loading}>{loading ? 'Creating…' : 'Create account'}</button>
+          </>)}
         </form>
         <p className="muted" style={{ marginTop: 14 }}>Already registered? <Link to={`/login?as=${ROLES.find((r) => r.value === role).slug}`}>Log in</Link></p>
       </section>

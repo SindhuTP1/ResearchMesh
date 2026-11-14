@@ -12,25 +12,29 @@ Academic collaboration and mentorship matching for a university. Students find f
 
 ```bash
 npm run setup      # once: installs root, server and client dependencies
-npm run dev        # API (http://localhost:4000) + web app (http://localhost:5173), using MongoDB from server/.env
+npm run dev        # API (http://localhost:4000) + web app (http://localhost:5180), using MongoDB from server/.env
 ```
 
-Open **http://localhost:5173**.
+Open **http://localhost:5180**.
 
 - `server/.env` holds `MONGODB_URI` (default `mongodb://127.0.0.1:27017/researchmesh`), `JWT_SECRET` and `ADMIN_SIGNUP_CODE`. Copy `server/.env.example` if it's missing.
-- **First start on an empty database** loads the university directory automatically. After that your data is kept: accounts, chats and files survive restarts. `npm run seed` wipes and reloads it.
+- The database starts with **departments only — no people**. Every student, faculty and admin account is created on the sign-up page, and everything is kept between restarts.
+- `npm run reset:people` removes every student and faculty account and everything they made (labs, projects, chats, files…). It saves a full backup to `backups/` first. Departments and the admin stay.
+- The web app runs on port **5180** (not Vite's usual 5173, which another local project uses).
 - No MongoDB? `npm run dev:memory` runs an embedded MongoDB (nothing to install). Its data is saved in `server/.devdata`, so accounts survive restarts; delete that folder to start fresh.
 - Chat files are stored in MongoDB GridFS (bucket `attachments`), so there is nothing else to configure.
 
 ### Accounts and the three portals
 
-There are **no demo logins**. Seeded people are directory records with random passwords, so nobody can log in as them. Create your own account on the sign-up page and pick a role; the login page also asks which portal you're entering, and refuses if the account has a different role.
+There are **no demo logins and no preloaded people**. Create accounts on the sign-up page and pick a role; the login page also asks which portal you're entering, and refuses if the account has a different role.
+
+**Remember me** (on by default) keeps you signed in on that browser and fills in your email next time. Passwords are never stored by the app: the browser's password manager offers to save them when you sign up or log in.
 
 | Role | How to get an account | What the portal has |
 | --- | --- | --- |
 | **Student** | Sign up as a student | Dashboard (profile strength, top mentor matches, projects that fit your skills, labs with openings in your areas, application tracker), Find faculty, My matches, Projects, Labs, My applications |
 | **Faculty** | Sign up as faculty (department and designation required). The account waits for admin verification; it works meanwhile, with an “Unverified” tag | Dashboard (requests waiting, lab capacity, research output by year, students to invite), My lab, My projects, Publications, Join requests, Find students, Faculty directory |
-| **Admin** | Sign up as admin with the **admin access code**: set `ADMIN_SIGNUP_CODE` in `server/.env`, or copy the one-time code the server prints when it starts | Platform overview (department table, lab capacity, request outcomes, recent activity), Faculty verifications, Users and roles, Departments, Projects & labs moderation |
+| **Admin** | **Exactly one admin.** The first person to sign up as admin with the access code (`ADMIN_SIGNUP_CODE` in `server/.env`) becomes the admin; after that the admin option is closed and nobody can be promoted to admin. Enforced by a unique MongoDB index, not just the UI | Platform overview (department table, lab capacity, request outcomes, recent activity), Faculty verifications, Users and roles, Departments, Projects & labs moderation |
 
 ### Teammates, connections, chat and calls
 
@@ -49,11 +53,58 @@ There are **no demo logins**. Seeded people are directory records with random pa
 
 **See real-time working:** in one window, sign up as faculty, create a lab on *My lab* and post a project. In a private window, sign up as a student with matching skills and request to join. The faculty dashboard shows the request instantly, no refresh.
 
+## Deploy
+
+In production one Node server does everything: the API, the WebSocket (chat, live updates, call signalling) **and** the built web app, all on one address. Any host that runs Node 22 or Docker works (Render, Railway, a VPS…). Hosts provide HTTPS, which browsers require for the camera and microphone.
+
+**1. Database: MongoDB Atlas (free tier)**
+Create a cluster, add a database user, allow access from anywhere (`0.0.0.0/0`), and copy the connection string, e.g. `mongodb+srv://user:pass@cluster0.xxxxx.mongodb.net/researchmesh`.
+
+**2. Call relay (TURN) — needed for calls between different networks**
+Without it, calls between two people on different Wi-Fi / mobile data often fail to connect. A free option is Metered.ca (Open Relay, free tier): create an app and copy its TURN URLs, username and credential.
+
+**3. Create the web service**
+- Build command: `npm run setup && npm run build`
+- Start command: `npm start`
+- Or use the `Dockerfile` in this folder (`docker build -t researchmesh .`).
+
+**4. Environment variables**
+
+| Variable | Value |
+| --- | --- |
+| `NODE_ENV` | `production` |
+| `MONGODB_URI` | your Atlas connection string |
+| `JWT_SECRET` | a long random string (32+ characters) |
+| `ADMIN_SIGNUP_CODE` | a secret code (8+ characters) — whoever has it creates the one admin account |
+| `TURN_URLS` | e.g. `turn:global.relay.metered.ca:80,turn:global.relay.metered.ca:443,turns:global.relay.metered.ca:443?transport=tcp` |
+| `TURN_USERNAME`, `TURN_CREDENTIAL` | from your TURN provider |
+| `PORT` | set automatically by most hosts |
+
+The server refuses to start in production if `MONGODB_URI`, `JWT_SECRET` or `ADMIN_SIGNUP_CODE` is missing, and warns if no TURN server is set.
+
+**5. After the first deploy**
+Open the site, sign up as **Admin** with your code (only one admin can ever exist), then create the student and faculty accounts. Two people connect (Find teammates → Connect → Accept, or by having a join request accepted), and can then chat and voice/video call from any device.
+
+### Testing on two laptops (chat, voice and video between accounts)
+
+Browsers only allow the camera and microphone on `https://` or `localhost`, so the second laptop needs HTTPS:
+
+```bash
+npm run dev:lan    # instead of npm run dev
+```
+
+1. Vite prints `Network: https://<this-PC's-IP>:5180`. Both laptops must be on the same Wi-Fi.
+2. On the first run, Windows asks whether Node.js may use the network: allow **Private networks**.
+3. On each laptop open that `https://…:5180` address. The browser warns about the self-signed certificate once: **Advanced → Proceed**.
+4. Sign up a different account on each laptop, connect them, open **Messages**, and use 📞 / 📹.
+
+Campus or public Wi-Fi that isolates devices from each other blocks this; a phone hotspot works. Push notifications need a trusted certificate, so on the second laptop they only work while the tab is open.
+
 ### Using a real (persistent) MongoDB
 
 ```bash
 cp server/.env.example server/.env   # set MONGODB_URI, JWT_SECRET and ADMIN_SIGNUP_CODE
-npm run dev                          # loads the directory automatically if the database is empty
+npm run dev                          # creates the departments if the database is empty
 ```
 
 Docker one-liner for a local Mongo: `docker run -d -p 27017:27017 --name mongo mongo:7`
@@ -62,8 +113,12 @@ Docker one-liner for a local Mongo: `docker run -d -p 27017:27017 --name mongo m
 
 | Command | |
 | --- | --- |
-| `npm test` | 33 tests: matching engine unit tests + end-to-end API tests (auth, portals, verification, search filters, DataLoader, subscriptions, connections, chat permissions, live messages, groups, invites, call signalling, attachments, reactions, edits, typing, read receipts, presence, push) |
+| `npm test` | 36 tests: matching engine unit tests + end-to-end API tests (auth, portals, verification, search filters, DataLoader, subscriptions, connections, chat permissions, live messages, groups, invites, call signalling, attachments, reactions, edits, typing, read receipts, presence, push) |
+| `npm run dev:lan` | Same as `dev`, but HTTPS and reachable from other devices on the Wi-Fi |
+| `npm run reset:people` | Back up, then delete all student and faculty accounts and their data |
+| `npm run seed:sample` | **Wipes the database** and loads a small sample directory of fake people (demos only) |
 | `npm run build` | Production build of the client |
+| `npm start` | Production server: API + built web app on one port (`NODE_ENV=production`) |
 | **F5** in VS Code | Debug configs for the API, tests and the client (see `.vscode/launch.json`) |
 
 ---
@@ -87,7 +142,7 @@ researchmesh/
 │   │   │   ├── matching.js         recommendation engine (pure functions)
 │   │   │   └── notify.js           persist + publish notifications
 │   │   ├── queryCounter.js         counts DB round-trips per request
-│   │   └── seed/seed.js
+│   │   └── seed/              seed.js (departments + sample data), resetPeople.js
 │   └── tests/
 ├── client/
 │   └── src/
