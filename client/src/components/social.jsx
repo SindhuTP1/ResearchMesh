@@ -89,7 +89,7 @@ export function InviteButton({ user }) {
       {openMenu && (
         <div className="menu" role="menu">
           {loading && <div className="faint">Loading…</div>}
-          {!loading && projects.length === 0 && <div className="faint">You have no open project with free seats. Start a team or post a project first.</div>}
+          {!loading && projects.length === 0 && <div className="faint">You have no open project with free seats. Post a project first (My projects).</div>}
           {projects.map((p) => (
             <button key={p.id} role="menuitem" disabled={inviting} onClick={async () => {
               try {
@@ -112,7 +112,8 @@ export function PersonActions({ user, invite = false }) {
   return (
     <div className="row" style={{ gap: 6, justifyContent: 'flex-end' }}>
       {user.connectionStatus === 'CONNECTED' ? <MessageButton user={user} /> : <ConnectButton user={user} />}
-      {invite && <InviteButton user={user} />}
+      {/* Only faculty own projects, so only faculty can invite people to one. */}
+      {invite && me.role === 'FACULTY' && user.role === 'STUDENT' && <InviteButton user={user} />}
     </div>
   );
 }

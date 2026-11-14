@@ -5,7 +5,7 @@ import { JoinButton } from '../Projects.jsx';
 import { Avatar, Loading, ErrorNote, Status, Stat, Meter, VerifiedBadge, UserLink, Slider, firstName, timeAgo } from '../../components/ui.jsx';
 import { PersonActions } from '../../components/social.jsx';
 import Hero from '../../components/Hero.jsx';
-import SearchBox from '../../components/SearchBox.jsx';
+import PeopleSearch from '../../components/PeopleSearch.jsx';
 
 /** What a student needs for matching to work, in the order it matters. */
 function profileChecks(me) {
@@ -66,7 +66,7 @@ export default function StudentDashboard() {
         <Link className="btn" to="/discover">Search faculty</Link>
       </Hero>
 
-      <SearchBox placeholder="Search faculty, students, projects, labs, papers…" />
+      <PeopleSearch />
 
       {invites.length > 0 && (
         <div className="banner">

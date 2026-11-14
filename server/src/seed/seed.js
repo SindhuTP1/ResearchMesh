@@ -203,7 +203,26 @@ const SKILL_POOLS = {
 
 const slug = (name) => name.replace(/^Dr\.\s*/, '').toLowerCase().replace(/[^a-z]+/g, '.');
 
-export async function seed({ quiet = true } = {}) {
+/**
+ * The app's directory is SMALL: 5 faculty and 5 students, enough to try every feature without
+ * scrolling past dozens of sample people. The FULL directory (45 faculty, 90 students) is kept
+ * for the automated tests, which exercise search and ranking edge cases.
+ */
+const SMALL_FACULTY = ['Dr. Ananya Rao', 'Dr. Suresh Babu', 'Dr. Rajesh Khanna', 'Dr. Rahul Iyer', 'Dr. Priya Raghavan'];
+const SMALL_STUDENT_DEPTS = ['CSE', 'IT', 'IT', 'BT', 'CHEM']; // the departments those faculty work in
+const STUDENT_COUNT = { small: SMALL_STUDENT_DEPTS.length, full: 90 };
+const studentEmail = (i) => {
+  const first = FIRST[i % FIRST.length];
+  const last = LAST[(i * 7) % LAST.length];
+  return { first, last, email: `${first.toLowerCase()}.${last.toLowerCase()}${i}@${DOMAIN}` };
+};
+/** Every email the seed creates for directory people (not real sign-ups). */
+const directoryEmails = (small) => [
+  ...FACULTY.filter(([name]) => !small || SMALL_FACULTY.includes(name)).map(([name]) => `${slug(name)}@${DOMAIN}`),
+  ...Array.from({ length: small ? STUDENT_COUNT.small : STUDENT_COUNT.full }, (_, i) => studentEmail(i).email),
+];
+
+export async function seed({ quiet = true, small = false } = {}) {
   const log = (...a) => !quiet && console.log(...a);
   s = 42;
 
@@ -220,6 +239,7 @@ export async function seed({ quiet = true } = {}) {
   const facultyDocs = [];
   const labDocs = [];
   for (const [i, [name, title, code, interests, skills, pubYears, labDef, verification = 'VERIFIED']] of FACULTY.entries()) {
+    if (small && !SMALL_FACULTY.includes(name)) continue;
     const f = await User.create({
       name, title, email: `${slug(name)}@${DOMAIN}`, passwordHash, role: 'FACULTY', department: dept[code]._id, verification,
       interests, skills: skills.map((n) => ({ name: n, level: 4 + (rand() > 0.5 ? 1 : 0) })),
@@ -262,11 +282,10 @@ export async function seed({ quiet = true } = {}) {
   const students = [];
   const codes = Object.keys(dept);
   const perDept = {};
-  for (let i = 0; i < 90; i++) {
-    const code = codes[i % codes.length];
+  for (let i = 0; i < (small ? STUDENT_COUNT.small : STUDENT_COUNT.full); i++) {
+    const code = small ? SMALL_STUDENT_DEPTS[i] : codes[i % codes.length];
     const nth = (perDept[code] = (perDept[code] ?? 0) + 1);
-    const first = FIRST[i % FIRST.length];
-    const last = LAST[(i * 7) % LAST.length];
+    const { first, last, email } = studentEmail(i);
     const [program, maxYear] = pick(PROGRAMS[code]);
     let skills = pickN(SKILL_POOLS[code], 3 + Math.floor(rand() * 3)).map((n) => ({ name: n, level: lvl() }));
     let interests = pickN(INTEREST_POOLS[code], 2 + Math.floor(rand() * 2));
@@ -276,7 +295,7 @@ export async function seed({ quiet = true } = {}) {
       interests = [...new Set([...interests, 'genomics'])];
     }
     students.push(await User.create({
-      name: `${first} ${last}`, email: `${first.toLowerCase()}.${last.toLowerCase()}${i}@${DOMAIN}`, passwordHash, role: 'STUDENT',
+      name: `${first} ${last}`, email, passwordHash, role: 'STUDENT',
       department: dept[code]._id, program, yearOfStudy: 1 + Math.floor(rand() * maxYear), skills, interests,
       lookingFor: pickN(['MENTOR', 'LAB', 'COLLABORATOR', 'PROJECT'], 1 + Math.floor(rand() * 2)),
       bio: `${program} student in ${dept[code].name}, interested in ${interests.join(', ')}.`,
@@ -339,21 +358,14 @@ export async function seed({ quiet = true } = {}) {
   const projectDocs = [];
   for (const [owner, title, description, requiredSkills, tags, status] of projectDefs) {
     const f = facultyByName[owner];
+    if (!f) continue; // that faculty member isn't in the small directory
     const labMembers = f.lab ? (labDocs.find((l) => String(l._id) === String(f.lab))?.members ?? []) : [];
     projectDocs.push(await Project.create({
       title, description, owner: f._id, lab: f.lab,
       members: [f._id, ...labMembers.slice(0, 1)], requiredSkills, tags, status, isOpen: true, maxMembers: 4 + Math.floor(rand() * 3),
     }));
   }
-  // A student-owned project
-  const webStudent = students.find((st) => st.skills.some((k) => k.name === 'javascript'));
-  if (webStudent) {
-    await Project.create({
-      title: 'Campus research-collab Discord bot', description: 'Bot that pings people when matching projects open.',
-      owner: webStudent._id, members: [webStudent._id], requiredSkills: ['javascript', 'node.js', 'graphql'],
-      tags: ['web development', 'nlp'], status: 'PLANNING', isOpen: true, maxMembers: 4,
-    });
-  }
+  // Projects are created by faculty only, so there are no student-owned projects.
 
   /* ------------------------ join requests (activity history) ----------------------- */
   const unattached = students.filter((st) => !st.lab);
@@ -383,7 +395,7 @@ export async function seed({ quiet = true } = {}) {
   }
   // One accepted request: a student who joined a project.
   const accepted = projectDocs.find((p) => p.title.startsWith('Placement portal'));
-  const acceptedStudent = students.find((st) => st.skills.some((k) => k.name === 'react') && !accepted.members.some((m) => String(m) === String(st._id)));
+  const acceptedStudent = accepted && students.find((st) => st.skills.some((k) => k.name === 'react') && !accepted.members.some((m) => String(m) === String(st._id)));
   if (accepted && acceptedStudent) {
     await JoinRequest.create({ requester: acceptedStudent._id, recipient: accepted.owner, targetType: 'PROJECT', project: accepted._id, lab: accepted.lab, status: 'ACCEPTED' });
     accepted.members.push(acceptedStudent._id);
@@ -396,18 +408,65 @@ export async function seed({ quiet = true } = {}) {
   return counts;
 }
 
-/** First start against a fresh database: load the directory. Never touches a database that has data. */
+/**
+ * A database loaded with the old, full directory: remove the sample people beyond the small set,
+ * plus everything that belongs to them (labs, projects, papers, grants, requests, notifications).
+ * Real sign-ups are never touched: only the exact emails the seed generates are removed.
+ * Returns how many sample people were removed (0 when there was nothing to do).
+ */
+export async function trimDirectory({ quiet = false } = {}) {
+  const keep = new Set(directoryEmails(true));
+  const extra = directoryEmails(false).filter((e) => !keep.has(e));
+  const gone = (await User.find({ email: { $in: extra } }).select('_id').lean()).map((u) => u._id);
+  if (!gone.length) return 0;
+  const { ConnectionRequest, Conversation, PushSubscription } = models;
+  const ids = { $in: gone };
+
+  const labs = (await Lab.find({ head: ids }).select('_id').lean()).map((l) => l._id);
+  const projects = (await Project.find({ $or: [{ owner: ids }, { lab: { $in: labs } }] }).select('_id').lean()).map((p) => p._id);
+  await Promise.all([
+    Lab.deleteMany({ _id: { $in: labs } }),
+    Project.deleteMany({ _id: { $in: projects } }),
+    Grant.deleteMany({ $or: [{ principalInvestigator: ids }, { lab: { $in: labs } }] }),
+    JoinRequest.deleteMany({ $or: [{ requester: ids }, { recipient: ids }, { project: { $in: projects } }, { lab: { $in: labs } }] }),
+    Notification.deleteMany({ $or: [{ recipient: ids }, { actor: ids }, { project: { $in: projects } }, { lab: { $in: labs } }] }),
+    ConnectionRequest.deleteMany({ $or: [{ from: ids }, { to: ids }] }),
+    PushSubscription.deleteMany({ user: ids }),
+  ]);
+  // Papers: drop the removed authors; delete papers left with no author from the directory.
+  await Publication.updateMany({ authors: ids }, { $pull: { authors: ids } });
+  await Publication.deleteMany({ authors: { $size: 0 } });
+  // Unlink the removed people and labs/projects from everyone who stays.
+  await User.updateMany({ connections: ids }, { $pull: { connections: ids } });
+  await User.updateMany({ lab: { $in: labs } }, { $set: { lab: null } });
+  await Lab.updateMany({ members: ids }, { $pull: { members: ids } });
+  await Project.updateMany({ members: ids }, { $pull: { members: ids } });
+  await Conversation.updateMany({ members: ids }, { $pull: { members: ids, admins: ids } });
+  await Conversation.updateMany({ project: { $in: projects } }, { $set: { project: null } });
+  await Conversation.updateMany({ lab: { $in: labs } }, { $set: { lab: null } });
+  await User.deleteMany({ _id: ids });
+  if (!quiet) console.log(`✂️  Trimmed the sample directory to ${SMALL_FACULTY.length} faculty and ${STUDENT_COUNT.small} students (removed ${gone.length} sample people). Your own accounts were kept.`);
+  return gone.length;
+}
+
+/**
+ * Every app start: an empty database gets the small directory; a database still holding the old
+ * full directory is trimmed to it. Real sign-ups are never touched.
+ */
 export async function seedIfEmpty(opts = { quiet: false }) {
-  if (await Department.estimatedDocumentCount()) return false;
+  if (await Department.estimatedDocumentCount()) {
+    await trimDirectory(opts);
+    return false;
+  }
   console.log('📦 Empty database — loading the university directory (first run only)…');
-  await seed(opts);
+  await seed({ ...opts, small: true });
   return true;
 }
 
-// Run directly: `node src/seed/seed.js`
+// Run directly: `node src/seed/seed.js` (or `npm run seed`) — wipes and reloads the small directory.
 if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   const uri = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/researchmesh';
   await mongoose.connect(uri);
-  await seed({ quiet: false });
+  await seed({ quiet: false, small: true });
   await mongoose.disconnect();
 }

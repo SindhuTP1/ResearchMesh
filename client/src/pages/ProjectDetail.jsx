@@ -1,6 +1,7 @@
+import { useEffect, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery } from '@apollo/client/react';
-import { PROJECT_DETAIL, RECOMMENDED_STUDENTS, UPDATE_PROJECT, OPEN_PROJECT_CHAT } from '../graphql/operations.js';
+import { PROJECT_DETAIL, RECOMMENDED_STUDENTS, UPDATE_PROJECT, OPEN_PROJECT_CHAT, FIND_TEAMMATES, INVITE_TO_PROJECT } from '../graphql/operations.js';
 import { PersonActions } from '../components/social.jsx';
 import { useAuth } from '../auth/AuthContext.jsx';
 import { JoinButton } from './Projects.jsx';
@@ -28,6 +29,79 @@ function Recommendations({ projectId, requiredSkills }) {
           </div>
         </div>
       ))}
+    </section>
+  );
+}
+
+/**
+ * Owner-only: search any student (name, skill, interest or program) and invite them to THIS project
+ * in one click. They get a notification and accept it from their requests; accepting adds them to
+ * the team and its chat.
+ */
+function InviteStudents({ project }) {
+  const toast = useToast();
+  const [q, setQ] = useState('');
+  const [term, setTerm] = useState('');
+  const [note, setNote] = useState('');
+  const [invited, setInvited] = useState({}); // userId → true, for this visit
+  useEffect(() => {
+    const t = setTimeout(() => setTerm(q.trim()), 300);
+    return () => clearTimeout(t);
+  }, [q]);
+  const { data, loading, error } = useQuery(FIND_TEAMMATES, {
+    variables: { input: { query: term, limit: 10 } },
+    skip: term.length < 2,
+  });
+  const [invite, { loading: sending }] = useMutation(INVITE_TO_PROJECT, { refetchQueries: ['ProjectDetail'] });
+  const memberIds = new Set(project.members.map((m) => m.id));
+  const people = (data?.findTeammates.items ?? []).map((m) => m.student).filter((u) => !memberIds.has(u.id));
+  const full = project.seatsLeft <= 0;
+
+  const send = async (u) => {
+    try {
+      await invite({ variables: { projectId: project.id, userId: u.id, message: note.trim() || null } });
+      setInvited((x) => ({ ...x, [u.id]: true }));
+      toast({ kind: 'ok', title: 'Invite sent', body: `${u.name} will be notified and can accept it from their requests.` });
+    } catch (e) {
+      if (/already a pending/i.test(errorText(e))) setInvited((x) => ({ ...x, [u.id]: true }));
+      toast({ kind: 'error', title: 'Invite not sent', body: errorText(e) });
+    }
+  };
+
+  return (
+    <section className="panel invite-panel">
+      <div className="panel-title">
+        <h3>Invite students</h3>
+        <span className="faint">{project.seatsLeft} {project.seatsLeft === 1 ? 'seat' : 'seats'} free</span>
+      </div>
+      {!project.isOpen && <p className="faint">This project isn't taking members. Choose “Start taking members” to send invites.</p>}
+      {project.isOpen && full && <p className="faint">The team is full. Raise the size or remove someone to invite more people.</p>}
+      {project.isOpen && !full && (
+        <>
+          <input type="search" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search students to invite"
+            placeholder="🔎 Search students by name, skill, interest or program" />
+          <input value={note} onChange={(e) => setNote(e.target.value)} maxLength={300} aria-label="Message with the invite (optional)"
+            placeholder="Message with the invite (optional) — e.g. We need help with the ML model" style={{ marginTop: 8 }} />
+          <ErrorNote error={error} />
+          {term.length < 2 && <p className="faint" style={{ marginTop: 10 }}>Type at least 2 letters to search.</p>}
+          {term.length >= 2 && loading && <Loading what="Searching" />}
+          {term.length >= 2 && !loading && people.length === 0 && <p className="faint" style={{ marginTop: 10 }}>No students match “{term}”.</p>}
+          <div className="invite-results">
+            {people.map((u) => (
+              <div key={u.id} className="invite-row">
+                <div>
+                  <UserLink user={u} />
+                  <div className="faint">{[u.program && `${u.program}${u.yearOfStudy ? `, year ${u.yearOfStudy}` : ''}`, u.department?.code].filter(Boolean).join(' · ')}</div>
+                  <div className="chips">{(u.skills ?? []).slice(0, 5).map((s) => <span key={s.name} className="chip">{s.name}</span>)}</div>
+                </div>
+                {invited[u.id]
+                  ? <span className="status pending">Invited</span>
+                  : <button className="btn btn-primary btn-sm" disabled={sending} onClick={() => send(u)}>Invite</button>}
+              </div>
+            ))}
+          </div>
+        </>
+      )}
     </section>
   );
 }
@@ -78,6 +152,7 @@ export default function ProjectDetail() {
               {p.tags.map((t) => <span key={t} className="chip interest">{t}</span>)}
             </div>
           </section>
+          {isOwner && <InviteStudents project={p} />}
           {isOwner && <Recommendations projectId={p.id} requiredSkills={p.requiredSkills} />}
         </div>
         <aside>

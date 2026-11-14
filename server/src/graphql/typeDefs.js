@@ -605,6 +605,8 @@ export const typeDefs = /* GraphQL */ `
 
     "Fellow students ranked as teammates for the caller"
     findTeammates(input: TeammateSearchInput!): TeammateResult!
+    "Students and faculty whose name contains the text (2+ letters). Never admins or yourself."
+    findPeople(name: String!, role: Role, limit: Int = 8): [User!]!
     myConnections: [User!]!
     connectionRequests(direction: RequestDirection!): [ConnectionRequest!]!
     "People the caller may message or add to a group: connections, project teammates, lab members"

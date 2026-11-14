@@ -561,6 +561,15 @@ export const social = {
     messages,
     unreadMessageCount,
     pushPublicKey: () => publicKey().catch(() => null),
+    /** Dashboard "find people": students and faculty whose name contains the text. Never admins or yourself. */
+    findPeople: (_, { name, role, limit }, ctx) => {
+      const me = requireUser(ctx);
+      const text = (name ?? '').trim().slice(0, 60);
+      if (text.length < 2) return [];
+      const roles = role && role !== 'ADMIN' ? [role] : ['STUDENT', 'FACULTY'];
+      return User.find({ _id: { $ne: me._id }, role: { $in: roles }, name: new RegExp(escapeRegex(text), 'i') })
+        .sort({ name: 1 }).limit(clamp(limit ?? 8, 20)).lean().exec();
+    },
     myConnections: async (_, __, ctx) => {
       const me = requireUser(ctx);
       const fresh = await User.findById(me._id).select('connections').lean();

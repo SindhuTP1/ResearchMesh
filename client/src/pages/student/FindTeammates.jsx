@@ -1,10 +1,9 @@
 import { useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { useMutation, useQuery } from '@apollo/client/react';
-import { FIND_TEAMMATES, FILTER_OPTIONS, DEPARTMENTS, MY_PROJECTS, OPEN_PROJECT_CHAT } from '../../graphql/operations.js';
-import { NewProject } from '../Projects.jsx';
+import { Link } from 'react-router-dom';
+import { useQuery } from '@apollo/client/react';
+import { FIND_TEAMMATES, FILTER_OPTIONS, DEPARTMENTS } from '../../graphql/operations.js';
 import { PersonActions } from '../../components/social.jsx';
-import { Avatar, Loading, ErrorNote, Empty, ChipPicker, Skills, Interests, useToast, errorText } from '../../components/ui.jsx';
+import { Avatar, Loading, ErrorNote, Empty, ChipPicker, Skills, Interests } from '../../components/ui.jsx';
 
 const PAGE = 15;
 const EMPTY = { interests: [], skills: [], dept: '', years: [], lookingForTeam: false, excludeConnected: false, q: '' };
@@ -28,38 +27,9 @@ function FitBar({ m }) {
   );
 }
 
-/** The student's own teams: student-led projects, each with a team chat. */
-function MyTeams({ onStart }) {
-  const navigate = useNavigate();
-  const toast = useToast();
-  const { data } = useQuery(MY_PROJECTS, { fetchPolicy: 'cache-and-network' });
-  const [openChat] = useMutation(OPEN_PROJECT_CHAT);
-  const teams = data?.projects ?? [];
-  return (
-    <section className="panel">
-      <div className="panel-title">
-        <h3>My teams</h3>
-        <button className="btn btn-primary btn-sm" onClick={onStart}>Start a team</button>
-      </div>
-      {teams.length === 0 && <p className="faint">Start a team around an idea, then invite the people below. Everyone you add gets a shared team chat.</p>}
-      {teams.map((p) => (
-        <div key={p.id} className="list-row">
-          <div>
-            <Link to={`/projects/${p.id}`} className="serif" style={{ fontWeight: 600 }}>{p.title}</Link>
-            <div className="faint">{p.members.length} of {p.maxMembers} · {p.isOpen ? 'looking for teammates' : 'team closed'}</div>
-            <div className="chips">{p.tags.map((t) => <span key={t} className="chip interest">{t}</span>)}</div>
-          </div>
-          <button className="btn btn-sm" onClick={() => openChat({ variables: { projectId: p.id } }).then(({ data: d }) => navigate(`/messages/${d.openProjectConversation.id}`)).catch((e) => toast({ kind: 'error', title: 'Chat not opened', body: errorText(e) }))}>Team chat</button>
-        </div>
-      ))}
-    </section>
-  );
-}
-
 export default function FindTeammates() {
   const [f, setF] = useState(EMPTY);
   const [page, setPage] = useState(0);
-  const [starting, setStarting] = useState(false);
   const { data: opts } = useQuery(FILTER_OPTIONS, { variables: { role: 'STUDENT' } });
   const { data: deptData } = useQuery(DEPARTMENTS);
   const set = (patch) => { setF((x) => ({ ...x, ...patch })); setPage(0); };
@@ -90,7 +60,7 @@ export default function FindTeammates() {
       <div className="page-head">
         <div>
           <h1>Find teammates</h1>
-          <p className="muted">Students across every department, ranked by how much of your domain they share, and by the skills they'd bring that you don't have. Connect, then invite them to a team.</p>
+          <p className="muted">Students across every department, ranked by how much of your domain they share, and by the skills they'd bring that you don't have. Connect with them and start a conversation.</p>
         </div>
       </div>
 
@@ -99,9 +69,6 @@ export default function FindTeammates() {
           placeholder="🔎 Search teammates by name, skill, interest or program — e.g. Python, robotics, Priya" />
         <button className="btn btn-primary">Search</button>
       </form>
-
-      {starting && <div style={{ marginBottom: 16 }}><NewProject onDone={() => setStarting(false)} /></div>}
-      <MyTeams onStart={() => setStarting(true)} />
 
       <section className="panel filters" style={{ marginTop: 16 }}>
         <div className="stack">
@@ -149,7 +116,7 @@ export default function FindTeammates() {
                     </div>
                     <div className="teammate-side">
                       <FitBar m={m} />
-                      <PersonActions user={u} invite />
+                      <PersonActions user={u} />
                     </div>
                   </div>
                 );

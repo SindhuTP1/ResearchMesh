@@ -84,6 +84,7 @@ export const Mutation = {
   /* ------------------------------ projects ---------------------------- */
   async createProject(_, { input }, ctx) {
     const me = requireUser(ctx);
+    if (me.role === 'STUDENT') throw forbidden('Only faculty can create projects. Ask a faculty member to post one, or request to join an existing project.');
     let lab = null;
     if (input.labId) {
       lab = await Lab.findById(oid(input.labId)).lean().exec();

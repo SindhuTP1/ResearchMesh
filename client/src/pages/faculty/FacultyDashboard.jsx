@@ -5,7 +5,7 @@ import { FACULTY_DASHBOARD, RECOMMENDED_STUDENTS, UPDATE_PROJECT } from '../../g
 import { RequestActions } from '../MyLab.jsx';
 import { Avatar, Loading, ErrorNote, Status, Stat, Skills, UserLink, money, firstName, timeAgo, useToast, errorText } from '../../components/ui.jsx';
 import Hero from '../../components/Hero.jsx';
-import SearchBox from '../../components/SearchBox.jsx';
+import PeopleSearch from '../../components/PeopleSearch.jsx';
 
 const THIS_YEAR = new Date().getFullYear();
 
@@ -119,7 +119,7 @@ export default function FacultyDashboard() {
         <Link className="btn" to="/students">Find students</Link>
       </Hero>
 
-      <SearchBox placeholder="Search students, colleagues, projects, labs, papers…" />
+      <PeopleSearch />
 
       <VerificationBanner me={me} />
 

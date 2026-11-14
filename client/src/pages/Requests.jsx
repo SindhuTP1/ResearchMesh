@@ -41,7 +41,7 @@ export default function Requests({ studentMode = false }) {
       {loading && !data && <Loading />}
       {data && list.length === 0 && (
         <Empty>{direction === 'INCOMING'
-          ? <p>{studentMode ? <>No invites yet. Connect with people on <Link to="/teammates">Find teammates</Link>.</> : 'No one has asked to join your projects or lab yet.'}</p>
+          ? <p>{studentMode ? <>No invites yet. Faculty can invite you to their projects. Meanwhile, browse <Link to="/projects">Projects</Link> and request to join one.</> : 'No one has asked to join your projects or lab yet.'}</p>
           : <p>Nothing sent yet. <Link to="/projects">Browse projects</Link>{studentMode && <> or <Link to="/labs">labs</Link></>}.</p>}</Empty>
       )}
       <div>

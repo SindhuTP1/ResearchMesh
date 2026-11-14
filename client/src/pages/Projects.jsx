@@ -99,6 +99,8 @@ export function NewProject({ onDone, stay }) {
 }
 
 export default function Projects() {
+  const { user } = useAuth();
+  const canPost = user?.role === 'FACULTY'; // only faculty create projects
   const [tag, setTag] = useState('');
   const [openOnly, setOpenOnly] = useState(true);
   const [creating, setCreating] = useState(false);
@@ -111,16 +113,16 @@ export default function Projects() {
           <h1>Projects</h1>
           <p className="muted">Open research projects across all labs. Request to join and the owner hears about it instantly.</p>
         </div>
-        {!creating && <button className="btn btn-primary" onClick={() => setCreating(true)}>Post a project</button>}
+        {canPost && !creating && <button className="btn btn-primary" onClick={() => setCreating(true)}>Post a project</button>}
       </div>
-      {creating && <div style={{ marginBottom: 20 }}><NewProject onDone={() => setCreating(false)} /></div>}
+      {canPost && creating && <div style={{ marginBottom: 20 }}><NewProject onDone={() => setCreating(false)} /></div>}
       <div className="row" style={{ marginBottom: 16 }}>
         <input style={{ maxWidth: 260 }} placeholder="Filter by skill or topic" aria-label="Filter by skill or topic" value={tag} onChange={(e) => setTag(e.target.value)} />
         <label className="check"><input type="checkbox" checked={openOnly} onChange={(e) => setOpenOnly(e.target.checked)} />Only projects taking members</label>
       </div>
       <ErrorNote error={error} />
       {loading && !data && <Loading />}
-      {data?.projects.length === 0 && <Empty><p>No projects match. Clear the filter or post one yourself.</p></Empty>}
+      {data?.projects.length === 0 && <Empty><p>No projects match. {canPost ? 'Clear the filter or post one yourself.' : 'Clear the filter to see more.'}</p></Empty>}
       <div className="project-list">{data?.projects.map((p) => <ProjectCard key={p.id} p={p} />)}</div>
     </>
   );

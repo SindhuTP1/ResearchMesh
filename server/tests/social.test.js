@@ -178,23 +178,42 @@ test('faculty group chat for the lab; students can only add people they know', a
   assert.equal(left.errors[0].extensions.code, 'FORBIDDEN');
 });
 
-test('student team: invite a teammate to a student project, accept joins the team chat', async () => {
-  const p = ok(await gql(`mutation{ createProject(input:{ title:"Self-hosted CI for clubs", requiredSkills:["docker"], tags:["devops"], maxMembers:4 }){ id } }`, {}, t.asha)).createProject;
-  const conv = ok(await gql(`mutation($p:ID!){ openProjectConversation(projectId:$p){ id members { id } } }`, { p: p.id }, t.asha)).openProjectConversation;
-  assert.equal(conv.members.length, 1);
+test('projects are faculty-only; faculty search a student, invite, accept joins the team chat', async () => {
+  const denied = await gql(`mutation{ createProject(input:{ title:"Student-run CI", requiredSkills:["docker"], maxMembers:4 }){ id } }`, {}, t.asha);
+  assert.equal(denied.errors[0].extensions.code, 'FORBIDDEN', 'students cannot create projects');
+  assert.match(denied.errors[0].message, /Only faculty/);
 
-  const inv = ok(await gql(`mutation($p:ID!,$u:ID!){ inviteToProject(projectId:$p, userId:$u, message:"Join us?"){ id kind status } }`, { p: p.id, u: id.ben }, t.asha)).inviteToProject;
+  const p = ok(await gql(`mutation{ createProject(input:{ title:"Self-hosted CI for clubs", requiredSkills:["docker"], tags:["devops"], maxMembers:4 }){ id } }`, {}, t.prof)).createProject;
+  const conv = ok(await gql(`mutation($p:ID!){ openProjectConversation(projectId:$p){ id members { id } } }`, { p: p.id }, t.prof)).openProjectConversation;
+
+  // The project page's "Invite students" panel: search by skill, then invite the person found.
+  const found = ok(await gql(`{ findTeammates(input:{ query:"kubernetes", limit:10 }) { items { student { id } } } }`, {}, t.prof)).findTeammates.items;
+  assert.ok(found.some((m) => m.student.id === id.ben), 'search finds Ben by skill');
+  const inv = ok(await gql(`mutation($p:ID!,$u:ID!){ inviteToProject(projectId:$p, userId:$u, message:"Join us?"){ id kind status } }`, { p: p.id, u: id.ben }, t.prof)).inviteToProject;
   assert.equal(inv.kind, 'INVITE');
-  const notOwner = await gql(`mutation($p:ID!,$u:ID!){ inviteToProject(projectId:$p, userId:$u){ id } }`, { p: p.id, u: id.chen }, t.ben);
+  const twice = await gql(`mutation($p:ID!,$u:ID!){ inviteToProject(projectId:$p, userId:$u){ id } }`, { p: p.id, u: id.ben }, t.prof);
+  assert.match(twice.errors[0].message, /already a pending/, 'no duplicate invites');
+  const notOwner = await gql(`mutation($p:ID!,$u:ID!){ inviteToProject(projectId:$p, userId:$u){ id } }`, { p: p.id, u: id.chen }, t.asha);
   assert.equal(notOwner.errors[0].extensions.code, 'FORBIDDEN');
 
   const mine = ok(await gql(`{ myJoinRequests(direction:INCOMING, status:PENDING){ id kind project { title } } }`, {}, t.ben)).myJoinRequests;
   assert.ok(mine.some((r) => r.id === inv.id && r.kind === 'INVITE'));
   ok(await gql(`mutation($i:ID!){ respondToJoinRequest(id:$i, accept:true){ status } }`, { i: inv.id }, t.ben));
 
-  const after = ok(await gql(`query($c:ID!){ conversation(id:$c){ members { id } } project(id:"${p.id}"){ members { id } } }`, { c: conv.id }, t.asha));
+  const after = ok(await gql(`query($c:ID!){ conversation(id:$c){ members { id } } project(id:"${p.id}"){ members { id } } }`, { c: conv.id }, t.prof));
   assert.ok(after.conversation.members.some((m) => m.id === id.ben), 'added to team chat');
   assert.ok(after.project.members.some((m) => m.id === id.ben), 'added to project');
+});
+
+test('dashboard people search: by name, students and faculty, never admins or yourself', async () => {
+  const q = async (name, role, tok = t.asha) => ok(await gql(`query($n:String!,$r:Role){ findPeople(name:$n, role:$r){ id name role } }`, { n: name, r: role }, tok)).findPeople;
+  assert.ok((await q('BEN')).some((u) => u.id === id.ben), 'case-insensitive part of a name');
+  assert.ok((await q('nisha')).some((u) => u.id === id.prof && u.role === 'FACULTY'), 'students find faculty');
+  assert.ok((await q('asha', null, t.prof)).some((u) => u.id === id.asha), 'faculty find students');
+  assert.ok(!(await q('asha')).some((u) => u.id === id.asha), 'never yourself');
+  assert.ok((await q('a', null)).length === 0, 'needs 2+ letters');
+  assert.ok((await q('ra', 'FACULTY')).every((u) => u.role === 'FACULTY'), 'role filter');
+  assert.ok(!(await q('registrar')).length || (await q('registrar')).every((u) => u.role !== 'ADMIN'), 'no admins');
 });
 
 test('video call signalling is relayed only to the addressed member', async () => {

@@ -615,6 +615,13 @@ export const FIND_TEAMMATES = gql`
   }
 `;
 
+export const FIND_PEOPLE = gql`
+  ${USER_CARD}
+  query FindPeople($name: String!, $role: Role, $limit: Int) {
+    findPeople(name: $name, role: $role, limit: $limit) { ...UserCard yearOfStudy }
+  }
+`;
+
 export const INVITE_TO_PROJECT = gql`
   mutation InviteToProject($projectId: ID!, $userId: ID!, $message: String) {
     inviteToProject(projectId: $projectId, userId: $userId, message: $message) { id status kind }

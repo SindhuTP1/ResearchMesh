@@ -36,7 +36,7 @@ const mongod = await MongoMemoryServer.create({
   instance: { dbPath, storageEngine: 'wiredTiger' },
 });
 await connectDB(mongod.getUri('researchmesh'));
-if (process.env.DEV_DB_RESET === '1') await seed({ quiet: false });
+if (process.env.DEV_DB_RESET === '1') await seed({ quiet: false, small: true });
 else await seedIfEmpty();
 console.log(`💾 Dev database stored in ${dbPath} (kept between restarts)`);
 ensureAdminSignupCode();

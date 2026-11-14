@@ -325,6 +325,24 @@ textarea { resize: vertical; min-height: 84px; }
 /* big search bar on Find teammates */
 .teammate-search { display: flex; gap: 8px; align-items: center; margin-top: 16px; }
 .teammate-search input { flex: 1; min-width: 0; font-size: 1rem; padding: 12px 14px; }
+/* Dashboard "find people by name" */
+.people-search { margin: 16px 0; }
+.people-search .search-box { margin: 0; }
+.people-search .search-box select { width: auto; border: 0; background: transparent; font-weight: 600; color: var(--ink); }
+.people-search-results { margin-top: 8px; padding: 6px 14px 10px; border: 1px solid var(--rule); border-radius: var(--r-sm); background: var(--paper); }
+.people-search-results > .faint { padding: 10px 0; }
+.people-search-row { display: grid; grid-template-columns: auto 1fr auto; gap: 12px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--rule); }
+.people-search-row .who-col { min-width: 0; }
+.people-search-row .name { font-weight: 600; margin-right: 8px; }
+.role-tag { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; padding: 2px 7px; border-radius: 999px; background: var(--moss-soft); color: var(--moss); }
+.role-tag.faculty { background: color-mix(in srgb, var(--amber) 22%, transparent); color: var(--ink); }
+@media (max-width: 560px) { .people-search-row { grid-template-columns: auto 1fr; } .people-search-row > :last-child { grid-column: 1 / -1; justify-content: flex-start; } }
+/* "Invite students" on a project page */
+.invite-panel input[type="search"] { font-size: 1rem; padding: 11px 14px; }
+.invite-results { margin-top: 10px; }
+.invite-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid var(--rule); }
+.invite-row:first-child { border-top: 0; }
+.invite-row .chips { margin-top: 4px; }
 /* Log in | Sign up tabs */
 .auth-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px; margin-bottom: 22px; border: 1px solid var(--rule); border-radius: 10px; }
 .auth-tabs a { text-align: center; padding: 9px 12px; border-radius: 7px; font-weight: 600; color: var(--ink); text-decoration: none; }
